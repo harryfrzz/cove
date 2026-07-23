@@ -6,8 +6,50 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A11E00103010B7BA00C9C456 /* CoveProcessingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00023010B7BA00C9C456 /* CoveProcessingWidget.swift */; };
+		A11E00113010B7BA00C9C456 /* CoveProcessingAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11E00043010B7BA00C9C456 /* CoveProcessingAttributes.swift */; };
+		A11E00123010B7BA00C9C456 /* coveProcessingWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A11E00013010B7BA00C9C456 /* coveProcessingWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A11E00413010B7BA00C9C456 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CCD9CC293010B7BA00C9C456 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A11E00403010B7BA00C9C456;
+			remoteInfo = coveProcessingWidget;
+		};
+		CA7E570000000000000000A7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CCD9CC293010B7BA00C9C456 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CCD9CC303010B7BA00C9C456;
+			remoteInfo = cove;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A11E00233010B7BA00C9C456 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A11E00123010B7BA00C9C456 /* coveProcessingWidget.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		A11E00013010B7BA00C9C456 /* coveProcessingWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = coveProcessingWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A11E00023010B7BA00C9C456 /* CoveProcessingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoveProcessingWidget.swift; sourceTree = "<group>"; };
+		A11E00033010B7BA00C9C456 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A11E00043010B7BA00C9C456 /* CoveProcessingAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = CoveProcessingAttributes.swift; path = cove/LiveActivity/CoveProcessingAttributes.swift; sourceTree = SOURCE_ROOT; };
 		CCD9CC313010B7BA00C9C456 /* cove.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = cove.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CA7E570000000000000000A2 /* coveTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = coveTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +58,29 @@
 			path = cove;
 			sourceTree = "<group>";
 		};
+		CA7E570000000000000000A0 /* coveTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = coveTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		A11E00213010B7BA00C9C456 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CCD9CC2E3010B7BA00C9C456 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA7E570000000000000000A4 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -29,10 +90,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		A11E00303010B7BA00C9C456 /* coveProcessingWidget */ = {
+			isa = PBXGroup;
+			children = (
+				A11E00023010B7BA00C9C456 /* CoveProcessingWidget.swift */,
+				A11E00043010B7BA00C9C456 /* CoveProcessingAttributes.swift */,
+				A11E00033010B7BA00C9C456 /* Info.plist */,
+			);
+			path = coveProcessingWidget;
+			sourceTree = "<group>";
+		};
 		CCD9CC283010B7BA00C9C456 = {
 			isa = PBXGroup;
 			children = (
 				CCD9CC333010B7BA00C9C456 /* cove */,
+				A11E00303010B7BA00C9C456 /* coveProcessingWidget */,
+				CA7E570000000000000000A0 /* coveTests */,
 				CCD9CC323010B7BA00C9C456 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +114,8 @@
 			isa = PBXGroup;
 			children = (
 				CCD9CC313010B7BA00C9C456 /* cove.app */,
+				A11E00013010B7BA00C9C456 /* coveProcessingWidget.appex */,
+				CA7E570000000000000000A2 /* coveTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,6 +123,25 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		A11E00403010B7BA00C9C456 /* coveProcessingWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A11E00523010B7BA00C9C456 /* Build configuration list for PBXNativeTarget "coveProcessingWidget" */;
+			buildPhases = (
+				A11E00203010B7BA00C9C456 /* Sources */,
+				A11E00213010B7BA00C9C456 /* Frameworks */,
+				A11E00223010B7BA00C9C456 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = coveProcessingWidget;
+			packageProductDependencies = (
+			);
+			productName = coveProcessingWidget;
+			productReference = A11E00013010B7BA00C9C456 /* coveProcessingWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		CCD9CC303010B7BA00C9C456 /* cove */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = CCD9CC3C3010B7BC00C9C456 /* Build configuration list for PBXNativeTarget "cove" */;
@@ -55,10 +149,12 @@
 				CCD9CC2D3010B7BA00C9C456 /* Sources */,
 				CCD9CC2E3010B7BA00C9C456 /* Frameworks */,
 				CCD9CC2F3010B7BA00C9C456 /* Resources */,
+				A11E00233010B7BA00C9C456 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A11E00423010B7BA00C9C456 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				CCD9CC333010B7BA00C9C456 /* cove */,
@@ -70,6 +166,29 @@
 			productReference = CCD9CC313010B7BA00C9C456 /* cove.app */;
 			productType = "com.apple.product-type.application";
 		};
+		CA7E570000000000000000A1 /* coveTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CA7E570000000000000000AA /* Build configuration list for PBXNativeTarget "coveTests" */;
+			buildPhases = (
+				CA7E570000000000000000A3 /* Sources */,
+				CA7E570000000000000000A4 /* Frameworks */,
+				CA7E570000000000000000A5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CA7E570000000000000000A6 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CA7E570000000000000000A0 /* coveTests */,
+			);
+			name = coveTests;
+			packageProductDependencies = (
+			);
+			productName = coveTests;
+			productReference = CA7E570000000000000000A2 /* coveTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -80,6 +199,13 @@
 				LastSwiftUpdateCheck = 2630;
 				LastUpgradeCheck = 2630;
 				TargetAttributes = {
+					A11E00403010B7BA00C9C456 = {
+						CreatedOnToolsVersion = 26.3;
+					};
+					CA7E570000000000000000A1 = {
+						CreatedOnToolsVersion = 26.3;
+						TestTargetID = CCD9CC303010B7BA00C9C456;
+					};
 					CCD9CC303010B7BA00C9C456 = {
 						CreatedOnToolsVersion = 26.3;
 					};
@@ -100,12 +226,28 @@
 			projectRoot = "";
 			targets = (
 				CCD9CC303010B7BA00C9C456 /* cove */,
+				A11E00403010B7BA00C9C456 /* coveProcessingWidget */,
+				CA7E570000000000000000A1 /* coveTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A11E00223010B7BA00C9C456 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CCD9CC2F3010B7BA00C9C456 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA7E570000000000000000A5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -115,7 +257,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		A11E00203010B7BA00C9C456 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A11E00103010B7BA00C9C456 /* CoveProcessingWidget.swift in Sources */,
+				A11E00113010B7BA00C9C456 /* CoveProcessingAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		CCD9CC2D3010B7BA00C9C456 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CA7E570000000000000000A3 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -124,7 +282,76 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		A11E00423010B7BA00C9C456 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A11E00403010B7BA00C9C456 /* coveProcessingWidget */;
+			targetProxy = A11E00413010B7BA00C9C456 /* PBXContainerItemProxy */;
+		};
+		CA7E570000000000000000A6 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CCD9CC303010B7BA00C9C456 /* cove */;
+			targetProxy = CA7E570000000000000000A7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		A11E00503010B7BA00C9C456 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z74D2LXWBT;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = coveProcessingWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.loop.cove.processing;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A11E00513010B7BA00C9C456 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z74D2LXWBT;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = coveProcessingWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.loop.cove.processing;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		CCD9CC3A3010B7BC00C9C456 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -178,7 +405,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -236,7 +463,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -256,6 +483,8 @@
 				DEVELOPMENT_TEAM = Z74D2LXWBT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+    INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Cove indexes your photos on-device so you can search them. Nothing ever leaves your iPhone.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -288,6 +517,8 @@
 				DEVELOPMENT_TEAM = Z74D2LXWBT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+    INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Cove indexes your photos on-device so you can search them. Nothing ever leaves your iPhone.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -310,9 +541,62 @@
 			};
 			name = Release;
 		};
+		CA7E570000000000000000A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z74D2LXWBT;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.loop.coveTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cove.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/cove";
+			};
+			name = Debug;
+		};
+		CA7E570000000000000000A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = Z74D2LXWBT;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.loop.coveTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/cove.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/cove";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		A11E00523010B7BA00C9C456 /* Build configuration list for PBXNativeTarget "coveProcessingWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A11E00503010B7BA00C9C456 /* Debug */,
+				A11E00513010B7BA00C9C456 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		CCD9CC2C3010B7BA00C9C456 /* Build configuration list for PBXProject "cove" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -327,6 +611,15 @@
 			buildConfigurations = (
 				CCD9CC3D3010B7BC00C9C456 /* Debug */,
 				CCD9CC3E3010B7BC00C9C456 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CA7E570000000000000000AA /* Build configuration list for PBXNativeTarget "coveTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CA7E570000000000000000A8 /* Debug */,
+				CA7E570000000000000000A9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

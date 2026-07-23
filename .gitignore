@@ -1,0 +1,4 @@
+# Local Core ML exports are large generated assets. Recreate them from the
+# documented conversion workflow before running the real embedding stack.
+cove/Resources/AI/MobileCLIP2S0ImageEncoder.mlpackage/
+cove/Resources/AI/MobileCLIP2S0TextEncoder.mlpackage/
