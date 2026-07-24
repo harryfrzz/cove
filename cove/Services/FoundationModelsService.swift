@@ -30,6 +30,15 @@ struct ItemExtraction: Codable, Sendable, Equatable {
 
     // Link / note
     var shortTitle: String?
+
+    // Ticket
+    var ticketType: String?
+    var ticketTitle: String?
+    var venueOrOperator: String?
+    var ticketDateTime: String?
+    var seatDetails: String?
+    var referenceNumber: String?
+    var price: String?
 }
 
 protocol StructuredExtractionService: Sendable {
@@ -43,7 +52,7 @@ protocol StructuredExtractionService: Sendable {
 
 @Generable(description: "Classification of a captured item")
 private struct ContentClassification {
-    @Guide(description: "The content type", .anyOf(["receipt", "event", "article", "note"]))
+    @Guide(description: "The content type", .anyOf(["receipt", "event", "article", "note","ticket"]))
     var category: String
 }
 
@@ -63,6 +72,23 @@ private struct ReceiptExtraction {
     var summary: String
     @Guide(description: "Search tags", .count(3...5))
     var tags: [String]
+}
+@Generable(description: "Fields extracted from a movie or travel ticket")
+private struct TicketExtraction {
+    @Guide(description: "Ticket type", .anyOf(["movie", "train", "bus", "event"]))
+    var ticketType: String
+    @Guide(description: "Film title, or journey description e.g. 'Chennai Central to Bengaluru'")
+    var title: String
+    @Guide(description: "Venue or operator name — theater name, or train/bus name and number")
+    var venueOrOperator: String
+    @Guide(description: "Showtime or departure date and time as printed, or empty if absent")
+    var dateTime: String
+    @Guide(description: "Seat and screen for movies, or coach and seat/berth for trains, as printed")
+    var seatDetails: String
+    @Guide(description: "Booking ID, PNR, or order number as printed, or empty if absent")
+    var referenceNumber: String
+    @Guide(description: "Price or fare as printed, digits only, or empty if absent")
+    var price: String
 }
 
 @Generable(description: "Fields extracted from an event, ticket, or invitation")
@@ -180,6 +206,29 @@ struct FoundationModelsService: SummarizationService, StructuredExtractionServic
                 )
             )
 
+        case "ticket":
+            let session = LanguageModelSession(
+                instructions: "Extract ticket fields exactly as they appear in the text. Do not invent values."
+            )
+            let ticket = try await session.respond(
+                to: content,
+                generating: TicketExtraction.self
+            ).content
+            return ItemEnrichment(
+                summary: "\(ticket.title) — \(ticket.dateTime)",
+                tags: [ticket.ticketType],
+                extraction: ItemExtraction(
+                    category: "ticket",
+                    ticketType: ticket.ticketType,
+                    ticketTitle: ticket.title,
+                    venueOrOperator: ticket.venueOrOperator.isEmpty ? nil : ticket.venueOrOperator,
+                    ticketDateTime: ticket.dateTime.isEmpty ? nil : ticket.dateTime,
+                    seatDetails: ticket.seatDetails.isEmpty ? nil : ticket.seatDetails,
+                    referenceNumber: ticket.referenceNumber.isEmpty ? nil : ticket.referenceNumber,
+                    price: ticket.price.isEmpty ? nil : ticket.price
+                )
+            )
+
         case "event":
             let session = LanguageModelSession(
                 instructions: "Extract event details exactly as they appear in the text. Do not invent values."
@@ -224,7 +273,7 @@ struct FoundationModelsService: SummarizationService, StructuredExtractionServic
         if kind == .link { return "article" }
 
         let session = LanguageModelSession(
-            instructions: "Classify the text of a saved item. A receipt shows purchased items or amounts paid. An event has a date and a happening to attend. An article is saved web content. Everything else is a note."
+            instructions: "Classify the text of a saved item. A receipt shows purchased items or amounts paid. A ticket is a movie, train, bus, or event booking with a seat, fare, or booking reference. An event has a date and a happening to attend. An article is saved web content. Everything else is a note."
         )
         let result = try await session.respond(
             to: content,

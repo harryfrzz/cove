@@ -70,11 +70,35 @@ enum WalletSeeder {
         Seed(
             title: "Dune: Part Three",
             extraction: ItemExtraction(
-                category: "event", eventTitle: "Dune: Part Three",
-                eventStart: "Sun 30 Aug · 7:15 PM", eventLocation: "IMAX Screen 1"
+                category: "ticket",
+                ticketType: "movie", ticketTitle: "Dune: Part Three",
+                venueOrOperator: "IMAX Screen 1", ticketDateTime: "Sun 30 Aug · 7:15 PM",
+                seatDetails: "Screen 1 · Seat J12", referenceNumber: "BMS-88214471", price: "450"
             ),
             color: UIColor(red: 0.55, green: 0.33, blue: 0.08, alpha: 1),
             lines: ["DUNE: PART THREE", "IMAX", "", "SUN 30 AUG · 7:15 PM", "SCREEN 1 · SEAT J12"]
+        ),
+        Seed(
+            title: "Chennai Central → Bengaluru",
+            extraction: ItemExtraction(
+                category: "ticket",
+                ticketType: "train", ticketTitle: "Chennai Central to Bengaluru",
+                venueOrOperator: "Shatabdi Express 12007", ticketDateTime: "Mon 3 Aug · 6:00 AM",
+                seatDetails: "Coach C4 · Seat 27", referenceNumber: "PNR 4821093567", price: "845"
+            ),
+            color: UIColor(red: 0.10, green: 0.30, blue: 0.30, alpha: 1),
+            lines: ["SHATABDI EXPRESS 12007", "", "CHENNAI CTL → BLR", "MON 3 AUG · 6:00 AM", "COACH C4 · SEAT 27"]
+        ),
+        Seed(
+            title: "Coldplay World Tour",
+            extraction: ItemExtraction(
+                category: "ticket",
+                ticketType: "event", ticketTitle: "Coldplay World Tour",
+                venueOrOperator: "DY Patil Stadium", ticketDateTime: "Fri 21 Aug · 7:00 PM",
+                seatDetails: "Gate 3 · GA Lower", referenceNumber: "TKT-CP2026-0091", price: "6500"
+            ),
+            color: UIColor(red: 0.42, green: 0.05, blue: 0.20, alpha: 1),
+            lines: ["COLDPLAY", "WORLD TOUR 2026", "", "FRI 21 AUG · 7:00 PM", "DY PATIL STADIUM", "", "GATE 3 · GA LOWER"]
         ),
         Seed(
             title: "IKEA",
