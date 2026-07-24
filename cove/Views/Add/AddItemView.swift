@@ -3,20 +3,30 @@ import SwiftData
 import SwiftUI
 import UIKit
 
-struct AddItemView: View {
-    private enum CaptureMode: String, CaseIterable, Identifiable {
-        case photo = "Photo"
-        case link = "Link"
-        case note = "Note"
+enum AddCaptureMode: String, CaseIterable, Identifiable {
+    case photo = "Photo"
+    case link = "Link"
+    case note = "Note"
 
-        var id: String { rawValue }
+    var id: String { rawValue }
+
+    var systemImage: String {
+        switch self {
+        case .photo: "photo.on.rectangle"
+        case .link: "link"
+        case .note: "note.text"
+        }
     }
+}
+
+struct AddItemView: View {
+    private typealias CaptureMode = AddCaptureMode
 
     @Environment(\.aiServices) private var aiServices
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
 
-    @State private var mode: CaptureMode = .photo
+    @State private var mode: CaptureMode
     @State private var imageKind: ShelfItemKind = .screenshot
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var selectedImageData: Data?
@@ -27,7 +37,15 @@ struct AddItemView: View {
     @State private var photoLoadError: String?
     @State private var didSubmit = false
 
-    var onDismiss: (Bool) -> Void = { _ in }
+    var onDismiss: (Bool) -> Void
+
+    init(
+        initialMode: AddCaptureMode = .photo,
+        onDismiss: @escaping (Bool) -> Void = { _ in }
+    ) {
+        _mode = State(initialValue: initialMode)
+        self.onDismiss = onDismiss
+    }
 
     var body: some View {
         NavigationStack {

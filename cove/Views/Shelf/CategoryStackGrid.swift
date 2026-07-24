@@ -23,6 +23,11 @@ struct CategoryStackGrid: View {
         let items: [ShelfItem]
     }
 
+    @Namespace private var pileNamespace
+    /// Each pile's frame in global space, so the detail wall can scatter
+    /// its cards outward from the tapped pile's on-screen position.
+    @State private var pileFrames: [String: CGRect] = [:]
+
     var body: some View {
         let columns = distributedColumns()
 
@@ -31,7 +36,7 @@ struct CategoryStackGrid: View {
                 LazyVStack(spacing: Self.rowSpacing) {
                     ForEach(column) { spec in
                         NavigationLink {
-                            StackDetailView(title: spec.title, items: spec.items)
+                            destination(for: spec)
                         } label: {
                             CategoryStackCard(
                                 title: spec.title,
@@ -41,11 +46,26 @@ struct CategoryStackGrid: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .matchedTransitionSource(id: spec.id, in: pileNamespace)
+                        .onGeometryChange(for: CGRect.self) { proxy in
+                            proxy.frame(in: .global)
+                        } action: { frame in
+                            pileFrames[spec.id] = frame
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
         }
+    }
+
+    private func destination(for spec: StackSpec) -> some View {
+        StackDetailView(
+            title: spec.title,
+            items: spec.items,
+            scatterFrame: pileFrames[spec.id]
+        )
+        .navigationTransition(.zoom(sourceID: spec.id, in: pileNamespace))
     }
 
     private var allStacks: [StackSpec] {

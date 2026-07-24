@@ -3,7 +3,9 @@ import SwiftUI
 
 struct ShelfView: View {
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
-    @State private var isAddingItem = false
+    @Environment(\.modelContext) private var modelContext
+    @State private var addMode: AddCaptureMode?
+    @State private var isShowingCamera = false
     @State private var quickCapture = QuickCaptureCoordinator.shared
     @State private var categorizer = ShelfCategorizer.shared
     @State private var importer = GalleryImporter.shared
@@ -49,8 +51,21 @@ struct ShelfView: View {
                     HStack(spacing: 14) {
                         searchBar
 
-                        Button {
-                            isAddingItem = true
+                        Menu {
+                            if CameraCaptureView.isAvailable {
+                                Button {
+                                    isShowingCamera = true
+                                } label: {
+                                    Label("Camera", systemImage: "camera")
+                                }
+                            }
+                            ForEach(AddCaptureMode.allCases) { mode in
+                                Button {
+                                    addMode = mode
+                                } label: {
+                                    Label(mode.rawValue, systemImage: mode.systemImage)
+                                }
+                            }
                         } label: {
                             Image(systemName: "plus")
                                 .font(.title3.weight(.semibold))
@@ -66,13 +81,19 @@ struct ShelfView: View {
                 .padding(.horizontal, 18)
                 .padding(.vertical, 6)
             }
-            .sheet(isPresented: $isAddingItem) {
-                AddItemView { didSubmit in
+            .sheet(item: $addMode) { mode in
+                AddItemView(initialMode: mode) { didSubmit in
                     guard !didSubmit else { return }
                     Task {
                         await ProcessingLiveActivityManager.shared.quickCaptureClosed()
                     }
                 }
+            }
+            .fullScreenCover(isPresented: $isShowingCamera) {
+                CameraCaptureView { image in
+                    saveCameraCapture(image)
+                }
+                .ignoresSafeArea()
             }
             .navigationDestination(isPresented: $isShowingWallet) {
                 WalletView()
@@ -95,7 +116,7 @@ struct ShelfView: View {
             }
             .onChange(of: quickCapture.requestID, initial: true) { _, requestID in
                 guard let requestID else { return }
-                isAddingItem = true
+                addMode = .photo
                 quickCapture.consume(requestID)
                 Task {
                     await ProcessingLiveActivityManager.shared.quickCaptureStarted()
@@ -174,10 +195,7 @@ struct ShelfView: View {
             .foregroundStyle(CoveTheme.ink.opacity(0.55))
             .padding(.horizontal, 18)
             .frame(height: 52)
-            .glassEffect(
-                .regular.tint(.blue.opacity(0.12)).interactive(),
-                in: Capsule()
-            )
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(.plain)
     }
@@ -200,7 +218,7 @@ struct ShelfView: View {
             }
 
             Button {
-                isAddingItem = true
+                addMode = .photo
             } label: {
                 Label("Add your first item", systemImage: "plus")
                     .font(.subheadline.weight(.semibold))
@@ -215,6 +233,24 @@ struct ShelfView: View {
         .glassEffect(.regular, in: .rect(cornerRadius: 34))
         .padding(36)
         .accessibilityElement(children: .combine)
+    }
+
+    /// Camera captures skip the add form: store a downscaled copy and hand
+    /// it straight to the processing pipeline, like a library import.
+    private func saveCameraCapture(_ image: UIImage) {
+        let item = ShelfItem(
+            kind: .image,
+            title: "Camera · \(Date.now.formatted(date: .abbreviated, time: .omitted))",
+            imageData: image.downscaledJPEGData(),
+            processingState: .queued
+        )
+        modelContext.insert(item)
+        try? modelContext.save()
+
+        let itemID = item.id
+        Task {
+            await ShelfProcessor.shared.enqueue(itemID: itemID)
+        }
     }
 
     private var processingActivitySnapshot: String {

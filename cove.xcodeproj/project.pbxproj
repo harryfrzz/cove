@@ -485,6 +485,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
     INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Cove indexes your photos on-device so you can search them. Nothing ever leaves your iPhone.";
+    INFOPLIST_KEY_NSCameraUsageDescription = "Cove uses the camera to capture photos straight onto your shelf. Everything stays on your iPhone.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -519,6 +520,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
     INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Cove indexes your photos on-device so you can search them. Nothing ever leaves your iPhone.";
+    INFOPLIST_KEY_NSCameraUsageDescription = "Cove uses the camera to capture photos straight onto your shelf. Everything stays on your iPhone.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
