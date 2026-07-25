@@ -62,7 +62,6 @@ actor ShelfProcessor {
         let currentVersion = AIServices.currentEmbeddingModelVersion
         let stale = (try? modelContext.fetch(FetchDescriptor<ShelfItem>()))?.filter {
             $0.processingState == .ready
-                && ($0.embeddingData != nil || $0.textEmbeddingData != nil)
                 && $0.embeddingModelVersion != currentVersion
         } ?? []
         for item in stale {
