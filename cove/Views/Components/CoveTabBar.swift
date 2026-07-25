@@ -3,6 +3,7 @@ import SwiftUI
 /// The three root destinations Cove switches between. Titles exist only for
 /// VoiceOver — the bar itself is deliberately icon-only.
 enum CoveTab: String, CaseIterable, Identifiable {
+    case home
     case shelf
     case search
     case wallet
@@ -11,6 +12,7 @@ enum CoveTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .home: "Home"
         case .shelf: "Shelf"
         case .search: "Search"
         case .wallet: "Wallet"
@@ -19,6 +21,7 @@ enum CoveTab: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .home: "house"
         case .shelf: "square.stack.3d.up"
         case .search: "magnifyingglass"
         case .wallet: "wallet.pass"
@@ -29,6 +32,7 @@ enum CoveTab: String, CaseIterable, Identifiable {
     /// no filled variant, so it stays put and reads as selected by tint alone.
     var selectedSystemImage: String {
         switch self {
+        case .home: "house.fill"
         case .shelf: "square.stack.3d.up.fill"
         case .search: "magnifyingglass"
         case .wallet: "wallet.pass.fill"
@@ -50,14 +54,12 @@ struct CoveTabBar: View {
     private static let iconSize: CGFloat = 54
     private static let barHeight: CGFloat = 52
 
-    /// Search sits on its own — it reads as an action, not a shelf you browse.
-    private static let pillTabs: [CoveTab] = [.shelf, .wallet]
+    private static let pillTabs: [CoveTab] = CoveTab.allCases
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
                 tabPill
-                searchButton
                 addButton
             }
         }
@@ -74,31 +76,9 @@ struct CoveTabBar: View {
             }
         }
         .padding(.horizontal, 5)
+        .frame(maxWidth: .infinity)
         .frame(height: Self.barHeight)
         .glassEffect(.regular.interactive(), in: Capsule())
-    }
-
-    private var searchButton: some View {
-        let isSelected = selection == .search
-
-        return Button {
-            select(.search)
-        } label: {
-            Image(systemName: CoveTab.search.systemImage)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.white : CoveTheme.ink.opacity(0.75))
-                .frame(width: Self.barHeight, height: Self.barHeight)
-                .background {
-                    if isSelected {
-                        Circle().fill(CoveTheme.ink)
-                    }
-                }
-                .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: Circle())
-        .accessibilityLabel(CoveTab.search.title)
-        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private func select(_ tab: CoveTab) {
@@ -122,7 +102,8 @@ struct CoveTabBar: View {
                 .font(.system(size: 18, weight: .semibold))
                 .contentTransition(.symbolEffect(.replace))
                 .foregroundStyle(isSelected ? CoveTheme.ink : CoveTheme.ink.opacity(0.42))
-                .frame(width: Self.iconSize, height: Self.barHeight - 8)
+                .frame(minWidth: Self.iconSize, maxWidth: .infinity)
+                .frame(height: Self.barHeight - 8)
                 .background {
                     if isSelected {
                         Capsule()

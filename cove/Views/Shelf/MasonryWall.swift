@@ -28,6 +28,9 @@ struct MasonryWall: View {
     @State private var wallFrame: CGRect = .zero
     @State private var settled = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Zoom source for opening one card, mirroring how a pile opens into its
+    /// wall — the card grows out of its slot instead of sliding in.
+    @Namespace private var cardNamespace
 
     private var wallWidth: CGFloat { wallFrame.width }
 
@@ -50,6 +53,9 @@ struct MasonryWall: View {
                         ForEach(column) { placed in
                             NavigationLink {
                                 ItemDetailView(item: placed.item)
+                                    .navigationTransition(
+                                        .zoom(sourceID: placed.id, in: cardNamespace)
+                                    )
                             } label: {
                                 MasonryCard(
                                     item: placed.item,
@@ -67,6 +73,9 @@ struct MasonryWall: View {
                                     delay: min(Double(placed.order) * 0.03, 0.36)
                                 )
                             )
+                            // Outside the scatter so the zoom source is the
+                            // card's settled frame, not its heaped transform.
+                            .matchedTransitionSource(id: placed.id, in: cardNamespace)
                             // Heap stacks like the pile: the newest card
                             // (the pile's front cover) draws on top and is
                             // also the first to fly into place.

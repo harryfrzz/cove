@@ -207,6 +207,9 @@ private struct WalletCarousel: View {
 
 struct WalletCardView: View {
     let card: WalletCard
+    /// Passes render at deck size by default; the popped-out single-pass
+    /// view asks for a taller card.
+    var height: CGFloat = 212
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -254,7 +257,7 @@ struct WalletCardView: View {
             }
         }
         .padding(20)
-        .frame(height: 212)
+        .frame(height: height)
         .background {
             LinearGradient(
                 colors: card.style.gradient,
@@ -322,6 +325,118 @@ struct WalletCardView: View {
             path.move(to: CGPoint(x: rect.minX, y: rect.midY))
             path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
             return path
+        }
+    }
+}
+
+// MARK: - Single pass
+
+/// One pass pulled out of the deck and held alone over a blurred shelf: the
+/// card at full size, the screenshot it came from underneath. Dismisses on a
+/// downward drag, a tap outside the card, or the close button.
+struct WalletPassDetailView: View {
+    let card: WalletCard
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var dragOffset: CGFloat = 0
+
+    /// Past this much downward travel the drag counts as a dismiss.
+    private static let dismissThreshold: CGFloat = 130
+
+    var body: some View {
+        ZStack {
+            // The blur is the whole background: the home page stays visible
+            // behind it, softened, so the pass reads as lifted off the page.
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+                .contentShape(.rect)
+                .onTapGesture { dismiss() }
+
+            // minHeight centers a short pass on the page and still lets a
+            // tall screenshot scroll.
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 20) {
+                        WalletCardView(card: card, height: 248)
+                            // The drag lives on the card, not the scroll
+                            // view, so pulling the pass down never fights
+                            // scrolling the shot below it.
+                            .gesture(dismissDrag)
+
+                        if card.item.imageData != nil {
+                            sourceShot
+                        }
+
+                        caption
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 28)
+                    .frame(minHeight: proxy.size.height, alignment: .center)
+                    // Drag follows the finger down, then springs back or
+                    // dismisses.
+                    .offset(y: max(dragOffset, 0))
+                }
+                .scrollIndicators(.hidden)
+                .scrollBounceBehavior(.basedOnSize)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(CoveTheme.ink.opacity(0.75))
+                    .frame(width: 36, height: 36)
+                    .glassEffect(.regular, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 20)
+            .padding(.top, 8)
+            .accessibilityLabel("Close pass")
+        }
+    }
+
+    private var dismissDrag: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                dragOffset = value.translation.height
+            }
+            .onEnded { value in
+                if value.translation.height > Self.dismissThreshold {
+                    dismiss()
+                } else {
+                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
+    /// The capture the pass was extracted from — the pass's "original".
+    private var sourceShot: some View {
+        ShelfThumbnail(item: card.item)
+            .frame(height: 260)
+            .clipShape(.rect(cornerRadius: 18))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(.white.opacity(0.5), lineWidth: 1)
+            }
+            .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
+            .accessibilityLabel("Original screenshot")
+    }
+
+    private var caption: some View {
+        VStack(spacing: 4) {
+            Text(card.item.title)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(CoveTheme.ink)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+            Text("Saved \(card.item.createdAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption)
+                .foregroundStyle(CoveTheme.inkSecondary)
         }
     }
 }

@@ -15,7 +15,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
 
-    @State private var tab: CoveTab = .shelf
+    @State private var tab: CoveTab = .home
     @State private var addMode: AddCaptureMode?
     @State private var isShowingCamera = false
     @State private var quickCapture = QuickCaptureCoordinator.shared
@@ -27,6 +27,13 @@ struct ContentView: View {
             CoveInkBackground()
 
             switch tab {
+            case .home:
+                NavigationStack {
+                    HomeDashboardView(
+                        onOpenShelf: { tab = .shelf },
+                        onOpenWallet: { tab = .wallet }
+                    )
+                }
             case .shelf:
                 ShelfView { addMode = .photo }
             case .search:
@@ -61,6 +68,9 @@ struct ContentView: View {
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--open-wallet") {
                 tab = .wallet
+            }
+            if ProcessInfo.processInfo.arguments.contains("--open-search") {
+                tab = .search
             }
 #endif
             await categorizer.prepareIfNeeded()
