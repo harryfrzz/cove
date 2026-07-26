@@ -36,10 +36,13 @@ struct ContentView: View {
                 }
             case .shelf:
                 ShelfView { addMode = .photo }
-            case .search:
-                NavigationStack { ShelfSearchView() }
             case .wallet:
                 NavigationStack { WalletView() }
+            case .profile:
+                ProfileView(
+                    onOpenShelf: { tab = .shelf },
+                    onOpenWallet: { tab = .wallet }
+                )
             }
         }
         .preferredColorScheme(.light)
@@ -69,8 +72,11 @@ struct ContentView: View {
             if ProcessInfo.processInfo.arguments.contains("--open-wallet") {
                 tab = .wallet
             }
-            if ProcessInfo.processInfo.arguments.contains("--open-search") {
-                tab = .search
+            if ProcessInfo.processInfo.arguments.contains("--open-shelf") {
+                tab = .shelf
+            }
+            if ProcessInfo.processInfo.arguments.contains("--open-profile") {
+                tab = .profile
             }
 #endif
             await categorizer.prepareIfNeeded()

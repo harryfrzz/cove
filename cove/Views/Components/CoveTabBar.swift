@@ -2,11 +2,14 @@ import SwiftUI
 
 /// The three root destinations Cove switches between. Titles exist only for
 /// VoiceOver — the bar itself is deliberately icon-only.
+///
+/// Search has no tab of its own: it lives in the shelf's own top bar, so
+/// finding something happens where the things already are.
 enum CoveTab: String, CaseIterable, Identifiable {
     case home
     case shelf
-    case search
     case wallet
+    case profile
 
     var id: String { rawValue }
 
@@ -14,8 +17,8 @@ enum CoveTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: "Home"
         case .shelf: "Shelf"
-        case .search: "Search"
         case .wallet: "Wallet"
+        case .profile: "Profile"
         }
     }
 
@@ -23,25 +26,24 @@ enum CoveTab: String, CaseIterable, Identifiable {
         switch self {
         case .home: "house"
         case .shelf: "square.stack.3d.up"
-        case .search: "magnifyingglass"
         case .wallet: "wallet.pass"
+        case .profile: "person.crop.circle"
         }
     }
 
-    /// Filled counterpart used while the tab is active. Magnifying glass has
-    /// no filled variant, so it stays put and reads as selected by tint alone.
+    /// Filled counterpart used while the tab is active.
     var selectedSystemImage: String {
         switch self {
         case .home: "house.fill"
         case .shelf: "square.stack.3d.up.fill"
-        case .search: "magnifyingglass"
         case .wallet: "wallet.pass.fill"
+        case .profile: "person.crop.circle.fill"
         }
     }
 }
 
-/// Floating dock: a Liquid Glass pill of icon-only destinations, a standalone
-/// search button, and the capture button — all inside one
+/// Floating dock: the destinations split into two Liquid Glass pills with the
+/// capture button seated dead centre between them — all inside one
 /// `GlassEffectContainer` so their glass samples and blends as one surface.
 struct CoveTabBar: View {
     @Binding var selection: CoveTab
@@ -54,13 +56,17 @@ struct CoveTabBar: View {
     private static let iconSize: CGFloat = 54
     private static let barHeight: CGFloat = 52
 
-    private static let pillTabs: [CoveTab] = CoveTab.allCases
+    /// Split either side of the capture button. Both pills claim an equal
+    /// share of the width, which is what keeps the plus optically centred.
+    private static let leadingTabs: [CoveTab] = [.home, .shelf]
+    private static let trailingTabs: [CoveTab] = [.wallet, .profile]
 
     var body: some View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
-                tabPill
+                tabPill(Self.leadingTabs)
                 addButton
+                tabPill(Self.trailingTabs)
             }
         }
         .frame(maxWidth: .infinity)
@@ -69,9 +75,9 @@ struct CoveTabBar: View {
         .sensoryFeedback(.selection, trigger: selection)
     }
 
-    private var tabPill: some View {
+    private func tabPill(_ tabs: [CoveTab]) -> some View {
         HStack(spacing: 2) {
-            ForEach(Self.pillTabs) { tab in
+            ForEach(tabs) { tab in
                 tabButton(for: tab)
             }
         }
