@@ -113,35 +113,22 @@ struct ShelfView: View {
 
     private var topBar: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 8) {
+            CoveScreenHeader("Shelf") {
 #if DEBUG
                 NavigationLink {
                     AIDiagnosticsView()
                 } label: {
-                    Image(systemName: "stethoscope")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(CoveTheme.ink.opacity(0.8))
-                        .frame(width: 36, height: 36)
-                        .glassEffect(.regular, in: Circle())
+                    CoveHeaderIcon(systemImage: "stethoscope", isInteractive: false)
                 }
                 .accessibilityLabel("AI diagnostics")
 #endif
-
-                Spacer(minLength: 0)
-
+            } trailing: {
                 Text("\(items.count)")
                     .font(.system(.subheadline, design: .serif, weight: .bold))
                     .foregroundStyle(.orange)
                     .frame(minWidth: 36, minHeight: 36)
                     .glassEffect(.regular, in: Circle())
                     .accessibilityLabel("\(items.count) items")
-            }
-            // Overlaid so the wordmark stays optically centered whatever sits
-            // in the leading slot.
-            .overlay {
-                Text("Cove")
-                    .font(.system(.title2, design: .serif, weight: .semibold))
-                    .foregroundStyle(CoveTheme.ink)
             }
 
             searchField

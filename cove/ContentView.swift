@@ -29,13 +29,12 @@ struct ContentView: View {
             switch tab {
             case .home:
                 NavigationStack {
-                    HomeDashboardView(
-                        onOpenShelf: { tab = .shelf },
-                        onOpenWallet: { tab = .wallet }
-                    )
+                    HomeDashboardView(onOpenWallet: { tab = .wallet })
                 }
             case .shelf:
                 ShelfView { addMode = .photo }
+            case .chat:
+                NavigationStack { ChatView() }
             case .wallet:
                 NavigationStack { WalletView() }
             case .profile:
@@ -77,6 +76,9 @@ struct ContentView: View {
             }
             if ProcessInfo.processInfo.arguments.contains("--open-profile") {
                 tab = .profile
+            }
+            if ProcessInfo.processInfo.arguments.contains("--open-chat") {
+                tab = .chat
             }
 #endif
             await categorizer.prepareIfNeeded()

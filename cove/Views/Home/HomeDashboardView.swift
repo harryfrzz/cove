@@ -1,13 +1,11 @@
 import SwiftData
 import SwiftUI
 
-/// Landing dashboard: a glanceable overview of everything Cove has captured —
-/// counts, wallet passes, upcoming events, and the latest saves — with jump
-/// links into the deeper tabs. Cards share the masonry wall's paper style
-/// (soft white, hairline, gentle shadow) so the page reads as one album.
+/// Landing dashboard: what Cove has captured that still matters at a glance —
+/// the wallet passes and what's coming up. Browsing the full shelf is the
+/// shelf tab's job, so the page stays a summary rather than a second feed.
 struct HomeDashboardView: View {
-    /// Wired by the shell so tiles can jump straight to the matching tab.
-    var onOpenShelf: () -> Void = {}
+    /// Wired by the shell so the wallet header can jump to its tab.
     var onOpenWallet: () -> Void = {}
 
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
@@ -15,10 +13,10 @@ struct HomeDashboardView: View {
 
     /// Tapped pass, held alone over the blurred page.
     @State private var expandedCard: WalletCard?
-    /// Zoom sources: passes grow out of the fan, prints out of the strip —
-    /// the same opening the album piles use.
+    /// Zoom sources: passes grow out of the fan, event cards out of the
+    /// carousel — the same opening the album piles use.
     @Namespace private var passNamespace
-    @Namespace private var printNamespace
+    @Namespace private var eventNamespace
 
     var body: some View {
         ScrollView {
@@ -27,14 +25,8 @@ struct HomeDashboardView: View {
                     walletSection
                 }
 
-                statGrid
-
                 if !eventRows.isEmpty {
                     eventsSection
-                }
-
-                if !recentItems.isEmpty {
-                    recentSection
                 }
             }
             .padding(.horizontal, 20)
@@ -124,68 +116,19 @@ struct HomeDashboardView: View {
         return Array(rows.prefix(4))
     }
 
-    private var recentItems: [ShelfItem] {
-        Array(items.prefix(8))
-    }
-
-    private func count(of bucket: ShelfBucket) -> Int {
-        readyItems.count { categorizer.bucket(for: $0) == bucket }
-    }
-
     // MARK: - Chrome
 
-    /// Same shape as the shelf top bar: centered wordmark, orange item count
-    /// on the trailing side.
+    /// Named for the destination, not the app: the dock is icon-only, so every
+    /// page's header has to say which tab you are standing on. The orange item
+    /// count keeps its trailing slot.
     private var topBar: some View {
-        HStack(spacing: 8) {
-            Spacer(minLength: 0)
-
+        CoveScreenHeader("Home") {
             Text("\(items.count)")
                 .font(.system(.subheadline, design: .serif, weight: .bold))
                 .foregroundStyle(.orange)
                 .frame(minWidth: 36, minHeight: 36)
                 .glassEffect(.regular, in: Circle())
                 .accessibilityLabel("\(items.count) items")
-        }
-        .overlay {
-            Text("Cove")
-                .font(.system(.title2, design: .serif, weight: .semibold))
-                .foregroundStyle(CoveTheme.ink)
-        }
-    }
-
-    // MARK: - Stats
-
-    private var statGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
-            StatTile(
-                value: items.count,
-                label: "Items saved",
-                systemImage: "square.stack.3d.up",
-                tint: CoveTheme.ink,
-                action: onOpenShelf
-            )
-            StatTile(
-                value: walletCards.count,
-                label: "Wallet passes",
-                systemImage: "wallet.pass",
-                tint: .orange,
-                action: onOpenWallet
-            )
-            StatTile(
-                value: count(of: .receipts),
-                label: "Receipts",
-                systemImage: "receipt",
-                tint: ShelfBucket.receipts.tint,
-                action: onOpenWallet
-            )
-            StatTile(
-                value: count(of: .events),
-                label: "Events & tickets",
-                systemImage: "ticket",
-                tint: ShelfBucket.events.tint,
-                action: onOpenWallet
-            )
         }
     }
 
@@ -205,59 +148,48 @@ struct HomeDashboardView: View {
 
     // MARK: - Events
 
+    /// Upcoming reads as a deck of cards rather than a list: each event gets
+    /// its own coloured face, and the next one peeks in from the trailing edge
+    /// so the row is visibly scrollable without an indicator.
     private var eventsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(hasUpcoming ? "Upcoming" : "Events & tickets")
 
-            VStack(spacing: 10) {
-                ForEach(eventRows) { row in
-                    NavigationLink {
-                        ItemDetailView(item: row.item)
-                    } label: {
-                        EventRowView(row: row)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    private var hasUpcoming: Bool {
-        eventRows.contains { ($0.date ?? .distantPast) >= .now }
-    }
-
-    // MARK: - Recents
-
-    /// Latest captures as a loose photo strip — small paper cards leaning
-    /// like prints on a shelf, echoing the masonry wall.
-    private var recentSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Recently saved", actionTitle: "See shelf", action: onOpenShelf)
-
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .bottom, spacing: 12) {
-                    ForEach(Array(recentItems.enumerated()), id: \.element.id) { index, item in
+                LazyHStack(spacing: 14) {
+                    ForEach(eventRows) { row in
                         NavigationLink {
-                            ItemDetailView(item: item)
+                            ItemDetailView(item: row.item)
                                 .navigationTransition(
-                                    .zoom(sourceID: item.id, in: printNamespace)
+                                    .zoom(sourceID: row.id, in: eventNamespace)
                                 )
                         } label: {
-                            RecentPrintCard(item: item)
-                                .rotationEffect(.degrees(index.isMultiple(of: 2) ? -1.6 : 1.4))
+                            EventCard(row: row)
                         }
                         .buttonStyle(.plain)
-                        .matchedTransitionSource(id: item.id, in: printNamespace)
+                        .matchedTransitionSource(id: row.id, in: eventNamespace)
+                        // Poster proportions, roughly 1:1.45 against the fixed
+                        // height. Narrower than this and the title runs out of
+                        // room — event names arrive with venues and route
+                        // codes attached, and they were being scaled down to
+                        // fit rather than simply fitting.
+                        .containerRelativeFrame(.horizontal) { length, _ in
+                            length * 0.50
+                        }
                     }
                 }
                 .scrollTargetLayout()
-                .padding(.vertical, 10)
+                .padding(.vertical, 6)
                 .padding(.horizontal, 2)
             }
             .scrollTargetBehavior(.viewAligned)
             .scrollIndicators(.hidden)
             .scrollClipDisabled()
         }
+    }
+
+    private var hasUpcoming: Bool {
+        eventRows.contains { ($0.date ?? .distantPast) >= .now }
     }
 
     // MARK: - Shared chrome
@@ -290,66 +222,6 @@ struct HomeDashboardView: View {
 
 // MARK: - Paper card style
 
-/// The masonry wall's card finish: soft white paper, hairline edge, gentle
-/// lift. Shared by every dashboard card so the page matches the shelf.
-private struct PaperCard: ViewModifier {
-    var cornerRadius: CGFloat = 18
-
-    func body(content: Content) -> some View {
-        content
-            .background(.white.opacity(0.65))
-            .clipShape(.rect(cornerRadius: cornerRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .strokeBorder(CoveTheme.hairline, lineWidth: 1)
-            }
-            .shadow(color: .black.opacity(0.10), radius: 8, y: 4)
-    }
-}
-
-private extension View {
-    func paperCard(cornerRadius: CGFloat = 18) -> some View {
-        modifier(PaperCard(cornerRadius: cornerRadius))
-    }
-}
-
-// MARK: - Stat tile
-
-private struct StatTile: View {
-    let value: Int
-    let label: String
-    let systemImage: String
-    let tint: Color
-    var action: () -> Void = {}
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                Image(systemName: systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(tint)
-                    .frame(width: 34, height: 34)
-                    .background(tint.opacity(0.12), in: .rect(cornerRadius: 10))
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("\(value)")
-                        .font(.system(.title, design: .serif, weight: .bold))
-                        .foregroundStyle(CoveTheme.ink)
-                        .contentTransition(.numericText())
-                    Text(label)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(CoveTheme.inkSecondary)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .paperCard(cornerRadius: 20)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(value) \(label)")
-    }
-}
-
 // MARK: - Event row
 
 private struct EventRow: Identifiable {
@@ -361,48 +233,135 @@ private struct EventRow: Identifiable {
     let item: ShelfItem
 }
 
-private struct EventRowView: View {
+/// One upcoming event as a coloured card: name and countdown at the top, the
+/// date as the centrepiece, venue along the bottom.
+private struct EventCard: View {
     let row: EventRow
 
+    private static let height: CGFloat = 264
+    private static let cornerRadius: CGFloat = 24
+
+    /// Built once per card. Rebuilding it inside `body` would re-run the
+    /// seeded draws on every animation frame.
+    private let palette: CoveGradientPalette
+
+    init(row: EventRow) {
+        self.row = row
+        palette = CoveGradientPalette(seed: row.id)
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            VStack(spacing: 1) {
-                if let date = row.date {
-                    Text(date.formatted(.dateTime.day()))
-                        .font(.system(.title3, design: .serif, weight: .bold))
-                        .foregroundStyle(CoveTheme.ink)
-                    Text(date.formatted(.dateTime.month(.abbreviated)))
-                        .font(.caption2.weight(.semibold))
-                        .textCase(.uppercase)
-                        .foregroundStyle(ShelfBucket.events.tint)
-                } else {
-                    Image(systemName: "ticket")
-                        .font(.title3.weight(.medium))
-                        .foregroundStyle(ShelfBucket.events.tint)
-                }
-            }
-            .frame(width: 44, height: 44)
-            .background(ShelfBucket.events.tint.opacity(0.12), in: .rect(cornerRadius: 12))
+        ZStack(alignment: .topLeading) {
+            CoveGradientBackdrop(palette: palette)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(CoveTheme.ink)
-                    .lineLimit(1)
-                Text([row.when, row.place].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(CoveTheme.inkSecondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(CoveTheme.inkSecondary)
+            numeral
+            content
         }
-        .padding(12)
-        .paperCard()
+        .frame(height: Self.height)
+        .clipShape(.rect(cornerRadius: Self.cornerRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: Self.cornerRadius)
+                .strokeBorder(.white.opacity(0.45), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.14), radius: 10, y: 5)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(row.title), \(countdown). \(footnote)")
+    }
+
+    /// The day, set oversized in the bottom-left and deliberately running off
+    /// both edges so the card crops it. Sitting between the gradient and the
+    /// text, it reads as part of the artwork rather than as a label.
+    private var numeral: some View {
+        Group {
+            if let date = row.date {
+                Text(date.formatted(.dateTime.day()))
+                    .font(.system(size: 132, weight: .heavy, design: .serif))
+            } else {
+                Image(systemName: "ticket.fill")
+                    .font(.system(size: 92, weight: .semibold))
+            }
+        }
+        // Ink, not white. The shader lifts every gradient toward white to keep
+        // the body text readable, which left a white numeral with nothing to
+        // sit against — on the paler rolls it broke up into disconnected
+        // shapes. A dark tint is legible against all of them.
+        .foregroundStyle(CoveTheme.ink.opacity(0.15))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+        // Overhangs enough to crop, not so much that the digits lose the
+        // curves that identify them.
+        .offset(x: -10, y: 26)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// Everything readable, hard-aligned to the leading edge: countdown,
+    /// title, then the month and place pinned to the bottom-right where the
+    /// numeral leaves room.
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(countdown.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.4)
+                .foregroundStyle(CoveTheme.ink.opacity(0.5))
+                .lineLimit(1)
+
+            Text(displayTitle)
+                .font(.system(size: 19, weight: .bold, design: .serif))
+                .foregroundStyle(CoveTheme.ink)
+                .lineLimit(3)
+                .multilineTextAlignment(.leading)
+                .minimumScaleFactor(0.82)
+                .allowsTightening(true)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 5)
+
+            Spacer(minLength: 10)
+
+            VStack(alignment: .trailing, spacing: 1) {
+                if let date = row.date {
+                    Text(date.formatted(.dateTime.month(.abbreviated)).uppercased())
+                        .font(.system(size: 13, weight: .black))
+                        .tracking(1.8)
+                        .foregroundStyle(CoveTheme.ink.opacity(0.72))
+                }
+                Text(footnote)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(CoveTheme.ink.opacity(0.55))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .padding(16)
+    }
+
+    /// Extracted titles carry their own separators — "Flight 6E 331 · BLR →
+    /// DEL". Left to wrap on its own the line broke after "331" and started
+    /// the next one with the dangling "·". The separator is already a natural
+    /// division in the title, so it becomes the line break instead of a
+    /// character that can be orphaned onto one.
+    private var displayTitle: String {
+        row.title
+            .replacingOccurrences(of: " · ", with: "\n")
+            .replacingOccurrences(of: " — ", with: "\n")
+    }
+
+    /// "Today" / "in 12 days", falling back to the printed string when the
+    /// date never parsed.
+    private var countdown: String {
+        guard let date = row.date else {
+            return row.when ?? "Saved"
+        }
+        if Calendar.current.isDateInToday(date) { return "Today" }
+        if Calendar.current.isDateInTomorrow(date) { return "Tomorrow" }
+        return date.formatted(.relative(presentation: .named))
+    }
+
+    private var footnote: String {
+        let parts = [row.place, row.when]
+            .compactMap(\.self)
+            .filter { !$0.isEmpty }
+        return parts.first ?? "Upcoming"
     }
 }
 
@@ -417,36 +376,88 @@ private struct WalletFanStack: View {
     let onSelect: (WalletCard) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Flipped once on appear; the bob is a repeating autoreversing
-    /// animation driven off this single change.
-    @State private var breathing = false
+    /// Bumped once the passes are on screen; every card's keyframe timeline
+    /// hangs off this, so one change fires the whole wave.
+    @State private var waveToken = 0
+    /// How far the deck has been swiped through, in cards.
+    @State private var cycle = 0
+    /// Horizontal travel of the card being thrown, and which card that is —
+    /// tracked by id, not by slot, so the throw stays with the departing pass
+    /// once the deck reorders underneath it.
+    @State private var swipeX: CGFloat = 0
+    @State private var swipingID: UUID?
 
     private static let cardHeight: CGFloat = 212
     private static let peek: CGFloat = 66
     private static let maxCards = 4
-    /// Headroom above and below the fan so the drifting cards never clip.
-    private static let bobRoom: CGFloat = 10
+    /// Headroom above and below the fan so a lifted card never clips.
+    private static let liftRoom: CGFloat = 22
+    /// Beat before the wave starts, so the page has settled first.
+    private static let introDelay: Duration = .seconds(0.18)
+    /// Sideways travel that commits to sending the front pass to the back.
+    private static let swipeThreshold: CGFloat = 56
+    /// How far the thrown card carries before the deck reorders behind it.
+    private static let throwDistance: CGFloat = 380
+    private static let throwDuration: TimeInterval = 0.18
 
-    private var shown: [WalletCard] { Array(cards.prefix(Self.maxCards)) }
+    /// The latest few passes — the whole deck the home fan ever deals with.
+    private var deck: [WalletCard] { Array(cards.prefix(Self.maxCards)) }
+
+    /// That deck rotated to wherever swiping has left it. Swiping cycles
+    /// within these cards rather than pulling further back through the
+    /// wallet, so the pass thrown off the front lands in the back slot and
+    /// stays there instead of dropping out of the fan.
+    private var shown: [WalletCard] {
+        guard !deck.isEmpty else { return [] }
+        let start = ((cycle % deck.count) + deck.count) % deck.count
+        return Array(deck[start...] + deck[..<start])
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Order 0 is the newest pass; it draws in front and sits lowest.
+            // Order 0 is the front pass; it draws on top and sits lowest.
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, card in
-                Button {
-                    onSelect(card)
-                } label: {
-                    WalletCardView(card: card)
-                }
-                .buttonStyle(.plain)
+                // Deliberately not a Button. `.gesture` sits at lower
+                // precedence than gestures a subview defines, and a Button
+                // handles its touches internally — so the swipe below never
+                // got to start. A tap gesture at this level competes fairly
+                // with the drag: the tap loses the moment the finger travels.
+                WalletCardView(card: card)
+                    .contentShape(.rect(cornerRadius: 22))
                 .scaleEffect(1 - CGFloat(index) * 0.015)
                 .rotationEffect(Self.tilt(order: index), anchor: .center)
-                .offset(y: -CGFloat(index) * Self.peek)
-                // Idle drift, applied after the fan offset so the resting
-                // layout is untouched.
-                .offset(y: bob(order: index))
-                .animation(bobAnimation(order: index), value: breathing)
+                // Zoom reads the frame recorded here, so it has to sit inside
+                // the padding below — that padding is what actually places the
+                // card in the fan.
                 .matchedTransitionSource(id: card.id, in: namespace)
+                // Fan spacing as real layout, not `.offset`. An offset moves
+                // pixels but leaves the layout frame at the bottom of the
+                // stack, which is exactly the frame the zoom transition would
+                // return the pass to — the passes above the front one would
+                // drop to the wrong place on close.
+                .padding(.bottom, CGFloat(index) * Self.peek)
+                .offset(x: card.id == swipingID ? swipeX : 0)
+                .rotationEffect(
+                    .degrees(card.id == swipingID ? Double(swipeX) * 0.018 : 0),
+                    anchor: .bottom
+                )
+                // Intro wave, applied after the fan layout so the resting
+                // arrangement is untouched.
+                .modifier(
+                    FanLiftWave(
+                        order: index,
+                        restingTilt: Self.tilt(order: index),
+                        trigger: waveToken
+                    )
+                )
+                // Swipe only belongs to the pass on top; the rest keep their
+                // tap. `.subviews` disables this gesture without disabling
+                // the tap attached below it.
+                .gesture(cycleDrag(card: card), including: index == 0 ? .all : .subviews)
+                .onTapGesture { onSelect(card) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityAction(named: "Open pass") { onSelect(card) }
+                .accessibilityAction(named: "Send to back") { cycleFan(direction: -1, card: card) }
                 .zIndex(-Double(index))
             }
         }
@@ -456,28 +467,68 @@ private struct WalletFanStack: View {
             alignment: .bottom
         )
         .padding(.horizontal, 6)
-        .padding(.top, 4 + Self.bobRoom)
-        .padding(.bottom, 8 + Self.bobRoom)
-        .onAppear { breathing = true }
+        .padding(.top, 4 + Self.liftRoom)
+        .padding(.bottom, 8 + Self.liftRoom)
+        // Keyed on the card count so the wave also runs once the passes
+        // finish loading, not just on the first empty render. The task is
+        // torn down with the view, so coming back to Home starts a fresh one.
+        .task(id: shown.count) { await startWave() }
     }
 
-    /// Neighbours drift opposite ways, so the fan slowly opens and closes
-    /// instead of sliding as one block. Deeper cards travel a little further
-    /// — the parallax reads as depth.
-    private func bob(order: Int) -> CGFloat {
-        guard !reduceMotion else { return 0 }
-        let amplitude = 3.5 + CGFloat(order) * 1.4
-        let up = order.isMultiple(of: 2)
-        return (breathing == up) ? -amplitude : amplitude
+    /// Fires the wave once, a beat after the fan is on screen. Reduce Motion
+    /// leaves the token alone, so no card timeline ever starts.
+    private func startWave() async {
+        guard !reduceMotion, !shown.isEmpty else { return }
+        guard (try? await Task.sleep(for: Self.introDelay)) != nil else { return }
+        waveToken += 1
     }
 
-    /// Slightly different periods per card, so the cards never sync up into
-    /// one pulsing shape.
-    private func bobAnimation(order: Int) -> Animation? {
-        guard !reduceMotion else { return nil }
-        return .easeInOut(duration: 2.4 + Double(order) * 0.45)
-            .repeatForever(autoreverses: true)
-            .delay(Double(order) * 0.15)
+    // MARK: - Swipe to cycle
+
+    /// Sideways drag on the front pass. `minimumDistance` keeps taps going to
+    /// the button underneath, and the gesture is only attached to order 0.
+    private func cycleDrag(card: WalletCard) -> some Gesture {
+        DragGesture(minimumDistance: 18)
+            .onChanged { value in
+                swipingID = card.id
+                swipeX = value.translation.width
+            }
+            .onEnded { value in
+                // Flick counts as well as distance, so a short fast swipe
+                // still sends the pass back.
+                let travel = value.translation.width + value.predictedEndTranslation.width * 0.25
+                guard abs(travel) > Self.swipeThreshold else {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) {
+                        swipeX = 0
+                    }
+                    return
+                }
+                cycleFan(direction: travel < 0 ? -1 : 1, card: card)
+            }
+    }
+
+    /// Front pass goes to the back, everything behind it steps forward. Two
+    /// beats: the card carries on out the way it was thrown while it is still
+    /// in front, then the deck reorders and it slides back in from the side —
+    /// by then it is the back card, so it tucks in under the others.
+    private func cycleFan(direction: CGFloat, card: WalletCard) {
+        guard deck.count > 1 else {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { swipeX = 0 }
+            return
+        }
+
+        withAnimation(.easeIn(duration: Self.throwDuration)) {
+            swipeX = direction * Self.throwDistance
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(Self.throwDuration))
+            withAnimation(.spring(response: 0.46, dampingFraction: 0.84)) {
+                cycle += 1
+                swipeX = 0
+            }
+            try? await Task.sleep(for: .seconds(0.5))
+            if swipingID == card.id { swipingID = nil }
+        }
     }
 
     /// Alternating fan tilts, front card nearly straight — same spirit as
@@ -493,55 +544,77 @@ private struct WalletFanStack: View {
     }
 }
 
-// MARK: - Recent print card
+// MARK: - Fan intro wave
 
-/// A small "print": thumbnail with a paper caption strip, like a photo
-/// pulled off the masonry wall.
-private struct RecentPrintCard: View {
-    let item: ShelfItem
+/// The four things a card does on its way through the wave. Tracked as one
+/// value so the keyframe timelines stay in step with each other.
+private struct FanLift {
+    var rise: CGFloat = 0
+    var scale: CGFloat = 1
+    /// 0 resting in the fan, 1 fully square to the page.
+    var straighten: Double = 0
+    /// 0 flat on the stack, 1 fully off it.
+    var shadow: Double = 0
+}
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Group {
-                if item.imageData != nil {
-                    ShelfThumbnail(item: item)
-                } else {
-                    VStack(spacing: 6) {
-                        Image(systemName: item.kind.systemImage)
-                            .font(.title3.weight(.medium))
-                            .foregroundStyle(CoveTheme.ink.opacity(0.55))
-                        Text(item.kind.label)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(CoveTheme.inkSecondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(CoveTheme.ink.opacity(0.05))
-                }
-            }
-            .frame(width: 118, height: 132)
-            .clipped()
-            .overlay {
-                if item.processingState == .queued || item.processingState == .processing {
-                    Rectangle().fill(.ultraThinMaterial)
-                    ProgressView().controlSize(.small)
-                }
-            }
+/// One card's trip through the wave: it lifts off the fan, straightens as it
+/// comes up, casts a deeper shadow at the top, then springs back down. Each
+/// card runs its own copy of this timeline offset by `order`, and the offset
+/// is much shorter than the trip, so several cards are always mid-flight —
+/// that overlap is what makes it a wave instead of a queue.
+private struct FanLiftWave: ViewModifier {
+    let order: Int
+    /// The card's resting fan angle, so the lift can rotate against it.
+    let restingTilt: Angle
+    let trigger: Int
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(item.title)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(CoveTheme.ink)
-                    .lineLimit(1)
-                Text(item.createdAt.formatted(.relative(presentation: .named)))
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(CoveTheme.inkSecondary)
+    /// Gap between one card starting its rise and the next starting its own.
+    private static let stagger: TimeInterval = 0.075
+    private static let riseDuration: TimeInterval = 0.3
+    private static let settleDuration: TimeInterval = 0.42
+
+    /// Nonzero even for the front card — a keyframe needs real duration.
+    private var delay: TimeInterval { 0.01 + Double(order) * Self.stagger }
+    /// Deeper cards travel further; the parallax reads as depth.
+    private var height: CGFloat { 13 + CGFloat(order) * 2 }
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: FanLift(), trigger: trigger) { view, lift in
+            view
+                .rotationEffect(.degrees(-restingTilt.degrees * lift.straighten), anchor: .center)
+                .scaleEffect(lift.scale)
+                .offset(y: lift.rise)
+                .shadow(
+                    color: .black.opacity(0.3 * lift.shadow),
+                    radius: 20 * lift.shadow,
+                    y: 14 * lift.shadow
+                )
+        } keyframes: { _ in
+            // Bouncy on the way up and down: the overshoot at the top is what
+            // makes the card read as light card stock rather than a slab.
+            KeyframeTrack(\.rise) {
+                LinearKeyframe(0, duration: delay)
+                SpringKeyframe(-height, duration: Self.riseDuration, spring: .bouncy(extraBounce: 0.3))
+                SpringKeyframe(0, duration: Self.settleDuration, spring: .bouncy(extraBounce: 0.2))
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 7)
-            .frame(width: 118, alignment: .leading)
+            KeyframeTrack(\.scale) {
+                LinearKeyframe(1, duration: delay)
+                SpringKeyframe(1.035, duration: Self.riseDuration, spring: .bouncy(extraBounce: 0.25))
+                SpringKeyframe(1, duration: Self.settleDuration, spring: .snappy)
+            }
+            // Straighten and shadow ride the motion rather than lead it, so
+            // they stay smooth while the height springs past its target.
+            KeyframeTrack(\.straighten) {
+                LinearKeyframe(0, duration: delay)
+                CubicKeyframe(0.55, duration: Self.riseDuration)
+                CubicKeyframe(0, duration: Self.settleDuration)
+            }
+            KeyframeTrack(\.shadow) {
+                LinearKeyframe(0, duration: delay)
+                CubicKeyframe(1, duration: Self.riseDuration)
+                CubicKeyframe(0, duration: Self.settleDuration)
+            }
         }
-        .paperCard(cornerRadius: 14)
-        .accessibilityLabel(item.title)
     }
 }
 

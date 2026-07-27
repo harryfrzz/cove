@@ -39,11 +39,22 @@ enum ThumbnailStore {
         return ratio
     }
 
+    private static func key(id: UUID, filling pixelSize: CGSize) -> NSString {
+        "\(id.uuidString)-\(Int(pixelSize.width))x\(Int(pixelSize.height))" as NSString
+    }
+
+    /// Already-decoded bitmap for this exact size, if there is one. Lets a
+    /// view paint on the frame it measures itself, instead of going through
+    /// an async hop to be handed something the cache already held.
+    static func cached(id: UUID, filling pixelSize: CGSize) -> UIImage? {
+        thumbnails.object(forKey: key(id: id, filling: pixelSize))
+    }
+
     /// Bitmap sized to fill `pixelSize` (scale-to-fill, so the shorter
     /// coverage axis matches exactly and the other overflows for cropping).
     /// Never upscales beyond the stored image.
     static func thumbnail(id: UUID, data: Data?, filling pixelSize: CGSize) async -> UIImage? {
-        let key = "\(id.uuidString)-\(Int(pixelSize.width))x\(Int(pixelSize.height))" as NSString
+        let key = key(id: id, filling: pixelSize)
         if let cached = thumbnails.object(forKey: key) {
             return cached
         }
@@ -110,17 +121,29 @@ struct ShelfThumbnail: View {
             proxy.size
         } action: { newSize in
             size = newSize
+            // Cache hits land on this frame. Waiting for the task below costs
+            // a runloop hop plus an await even when the bitmap is already in
+            // memory, which is the flash of empty card you see when reopening
+            // a pass.
+            if let ready = ThumbnailStore.cached(id: item.id, filling: pixels(for: newSize)) {
+                image = ready
+            }
         }
         .task(id: "\(item.id.uuidString)-\(Int(size.width))x\(Int(size.height))") {
             guard size.width > 0, size.height > 0 else { return }
+            if let ready = ThumbnailStore.cached(id: item.id, filling: pixels(for: size)) {
+                image = ready
+                return
+            }
             image = await ThumbnailStore.thumbnail(
                 id: item.id,
                 data: item.imageData,
-                filling: CGSize(
-                    width: size.width * displayScale,
-                    height: size.height * displayScale
-                )
+                filling: pixels(for: size)
             )
         }
+    }
+
+    private func pixels(for size: CGSize) -> CGSize {
+        CGSize(width: size.width * displayScale, height: size.height * displayScale)
     }
 }

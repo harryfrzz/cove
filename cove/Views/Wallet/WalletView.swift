@@ -135,8 +135,25 @@ struct WalletView: View {
                 }
             }
         }
-        .navigationTitle("Wallet")
-        .navigationBarTitleDisplayMode(.inline)
+        // Cove's own header rather than the system navigation bar: Wallet was
+        // the one root screen wearing a different kind of title, which read as
+        // a pushed page instead of a tab.
+        .safeAreaInset(edge: .top) {
+            CoveScreenHeader("Wallet") {
+                if !cards.isEmpty {
+                    Text("\(cards.count)")
+                        .font(.system(.subheadline, design: .serif, weight: .bold))
+                        .foregroundStyle(.orange)
+                        .frame(minWidth: 36, minHeight: 36)
+                        .glassEffect(.regular, in: Circle())
+                        .accessibilityLabel("\(cards.count) passes")
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+        }
+        .toolbar(.hidden, for: .navigationBar)
     }
 
     private var emptyState: some View {
@@ -338,10 +355,6 @@ struct WalletPassDetailView: View {
     let card: WalletCard
 
     @Environment(\.dismiss) private var dismiss
-    @State private var dragOffset: CGFloat = 0
-
-    /// Past this much downward travel the drag counts as a dismiss.
-    private static let dismissThreshold: CGFloat = 130
 
     var body: some View {
         ZStack {
@@ -359,10 +372,6 @@ struct WalletPassDetailView: View {
                 ScrollView {
                     VStack(spacing: 20) {
                         WalletCardView(card: card, height: 248)
-                            // The drag lives on the card, not the scroll
-                            // view, so pulling the pass down never fights
-                            // scrolling the shot below it.
-                            .gesture(dismissDrag)
 
                         if card.item.imageData != nil {
                             sourceShot
@@ -373,9 +382,12 @@ struct WalletPassDetailView: View {
                     .padding(.horizontal, 24)
                     .padding(.vertical, 28)
                     .frame(minHeight: proxy.size.height, alignment: .center)
-                    // Drag follows the finger down, then springs back or
-                    // dismisses.
-                    .offset(y: max(dragOffset, 0))
+                    // No drag-to-dismiss offset here on purpose. The zoom
+                    // transition runs its own interactive dismiss and returns
+                    // the pass to the frame it was presented from; shifting
+                    // the content ourselves and then calling dismiss() left
+                    // that return starting from a displaced frame, which is
+                    // what made the pass land off the fan.
                 }
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
@@ -396,22 +408,6 @@ struct WalletPassDetailView: View {
             .padding(.top, 8)
             .accessibilityLabel("Close pass")
         }
-    }
-
-    private var dismissDrag: some Gesture {
-        DragGesture(minimumDistance: 12)
-            .onChanged { value in
-                dragOffset = value.translation.height
-            }
-            .onEnded { value in
-                if value.translation.height > Self.dismissThreshold {
-                    dismiss()
-                } else {
-                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                        dragOffset = 0
-                    }
-                }
-            }
     }
 
     /// The capture the pass was extracted from — the pass's "original".
