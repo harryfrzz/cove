@@ -387,8 +387,14 @@ private struct WalletFanStack: View {
     @State private var swipeX: CGFloat = 0
     @State private var swipingID: UUID?
 
-    private static let cardHeight: CGFloat = 212
-    private static let peek: CGFloat = 66
+    /// Matches `WalletCardView`'s default height — the fan sizes its own
+    /// container from this, so the two have to move together.
+    private static let cardHeight: CGFloat = 158
+    /// A real pile: the newest ticket sits in front at full height and the
+    /// rest stack behind it, each showing just its emblem and category strip.
+    /// Deliberately stops short of the title line — a half-clipped title reads
+    /// as broken, an emblem strip reads as a stack.
+    private static let peek: CGFloat = 62
     private static let maxCards = 4
     /// Headroom above and below the fan so a lifted card never clips.
     private static let liftRoom: CGFloat = 22
@@ -534,12 +540,15 @@ private struct WalletFanStack: View {
     /// Alternating fan tilts, front card nearly straight — same spirit as
     /// the shelf pile (see MasonryWall.heapTilt).
     private static func tilt(order: Int) -> Angle {
+        // Just off-square. Any more and the tilt swings each strip's lower
+        // edge far enough to slice the stub thumbnail at a different height on
+        // every card, which reads as sloppy rather than hand-stacked.
         switch order {
-        case 0: .degrees(-1.5)
-        case 1: .degrees(2.8)
-        case 2: .degrees(-3.4)
-        case 3: .degrees(3.2)
-        default: .degrees(-2.6)
+        case 0: .degrees(-0.5)
+        case 1: .degrees(0.8)
+        case 2: .degrees(-0.9)
+        case 3: .degrees(0.7)
+        default: .degrees(-0.6)
         }
     }
 }
