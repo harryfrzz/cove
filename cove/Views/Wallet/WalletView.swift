@@ -11,11 +11,23 @@ struct WalletCard: Identifiable {
         case ticket
         case generic
 
+        /// The ticket stock itself: pale, so the print on top can be ink
+        /// rather than white-on-saturated.
         var gradient: [Color] {
             switch self {
-            case .receipt: [Color(red: 0.93, green: 0.48, blue: 0.14), Color(red: 0.72, green: 0.26, blue: 0.05)]
-            case .ticket: [Color(red: 0.56, green: 0.27, blue: 0.86), Color(red: 0.87, green: 0.27, blue: 0.57)]
-            case .generic: [Color(red: 0.22, green: 0.26, blue: 0.34), Color(red: 0.10, green: 0.12, blue: 0.18)]
+            case .receipt: [Color(red: 0.89, green: 0.93, blue: 0.60), Color(red: 0.72, green: 0.90, blue: 0.66)]
+            case .ticket: [Color(red: 0.76, green: 0.84, blue: 1.00), Color(red: 0.78, green: 0.71, blue: 0.97)]
+            case .generic: [Color(red: 0.69, green: 0.93, blue: 0.82), Color(red: 0.59, green: 0.89, blue: 0.79)]
+            }
+        }
+
+        /// What's printed on that stock — a deep tint of the card's own hue,
+        /// so each pass reads as one colour family rather than black on pastel.
+        var ink: Color {
+            switch self {
+            case .receipt: Color(red: 0.19, green: 0.28, blue: 0.08)
+            case .ticket: Color(red: 0.18, green: 0.16, blue: 0.44)
+            case .generic: Color(red: 0.05, green: 0.29, blue: 0.24)
             }
         }
 
@@ -34,6 +46,25 @@ struct WalletCard: Identifiable {
             case .generic: "wallet.pass"
             }
         }
+
+        /// Readable on the cream panel, where the pastel stock isn't behind it.
+        var accent: Color {
+            switch self {
+            case .receipt: Color(red: 0.36, green: 0.50, blue: 0.10)
+            case .ticket: Color(red: 0.40, green: 0.33, blue: 0.84)
+            case .generic: Color(red: 0.06, green: 0.47, blue: 0.39)
+            }
+        }
+    }
+
+    /// One labelled fact for the detail panel under the carousel. Kept as a
+    /// list rather than fixed slots because a flight has more worth showing
+    /// (seat, gate, reference) than a receipt does.
+    struct Detail: Identifiable {
+        var id: String { label }
+        let label: String
+        let value: String
+        let systemImage: String
     }
 
     let id: UUID
@@ -44,6 +75,7 @@ struct WalletCard: Identifiable {
     let primaryValue: String
     let secondaryLabel: String
     let secondaryValue: String
+    let details: [Detail]
     let item: ShelfItem
 
     @MainActor
@@ -60,6 +92,11 @@ struct WalletCard: Identifiable {
                 primaryValue: "\(extraction.currency ?? "")\(extraction.total ?? "—")",
                 secondaryLabel: "Date",
                 secondaryValue: extraction.date ?? savedDate,
+                details: compact([
+                    ("Amount", "\(extraction.currency ?? "")\(extraction.total ?? "")", "indianrupeesign.circle"),
+                    ("Date", extraction.date, "calendar"),
+                    ("Category", extraction.expenseCategory, "tag")
+                ]),
                 item: item
             )
         }
@@ -74,6 +111,34 @@ struct WalletCard: Identifiable {
                 primaryValue: extraction.eventStart ?? "—",
                 secondaryLabel: "Where",
                 secondaryValue: extraction.eventLocation ?? "—",
+                details: compact([
+                    ("Location", extraction.eventLocation, "mappin.and.ellipse"),
+                    ("Time", extraction.eventStart, "clock"),
+                    ("Ends", extraction.eventEnd, "clock.badge.checkmark")
+                ]),
+                item: item
+            )
+        }
+
+        // Travel and cinema tickets. Without this branch they fell through to
+        // the generic case below and lost seat, gate, and reference entirely.
+        if let extraction = item.extraction, extraction.category == "ticket" {
+            return WalletCard(
+                id: item.id,
+                style: .ticket,
+                title: extraction.ticketTitle ?? item.title,
+                subtitle: extraction.venueOrOperator,
+                primaryLabel: "Departs",
+                primaryValue: extraction.ticketDateTime ?? "—",
+                secondaryLabel: "Seat",
+                secondaryValue: extraction.seatDetails ?? "—",
+                details: compact([
+                    ("Seat", extraction.seatDetails, "chair"),
+                    ("Time", extraction.ticketDateTime, "clock"),
+                    ("Operator", extraction.venueOrOperator, "building.2"),
+                    ("Reference", extraction.referenceNumber, "number"),
+                    ("Fare", extraction.price, "creditcard")
+                ]),
                 item: item
             )
         }
@@ -93,8 +158,21 @@ struct WalletCard: Identifiable {
             primaryValue: savedDate,
             secondaryLabel: "Kind",
             secondaryValue: item.kind.label,
+            details: compact([
+                ("Saved", savedDate, "tray.and.arrow.down"),
+                ("Kind", item.kind.label, "square.stack")
+            ]),
             item: item
         )
+    }
+
+    /// Drops facts the extraction didn't find, so the panel never shows a
+    /// labelled blank.
+    private static func compact(_ raw: [(String, String?, String)]) -> [Detail] {
+        raw.compactMap { label, value, symbol in
+            guard let value, !value.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+            return Detail(label: label, value: value, systemImage: symbol)
+        }
     }
 }
 
@@ -103,6 +181,14 @@ struct WalletCard: Identifiable {
 struct WalletView: View {
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
     @State private var categorizer = ShelfCategorizer.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Which pass the carousel has settled on.
+    @State private var selectedID: UUID?
+    /// What the panel is currently showing. Trails `selectedID` by one
+    /// animation so the slide direction can be decided before it moves.
+    @State private var visibleID: UUID?
+    @State private var slideForward = true
 
     private var cards: [WalletCard] {
         items
@@ -115,6 +201,14 @@ struct WalletView: View {
             .map { WalletCard.card(for: $0) }
     }
 
+    private var visibleCard: WalletCard? {
+        cards.first { $0.id == visibleID } ?? cards.first
+    }
+
+    private func index(of id: UUID?) -> Int {
+        cards.firstIndex { $0.id == id } ?? 0
+    }
+
     var body: some View {
         ZStack {
             CoveInkBackground()
@@ -122,17 +216,30 @@ struct WalletView: View {
             if cards.isEmpty {
                 emptyState
             } else {
-                VStack(spacing: 26) {
-                    Spacer(minLength: 0)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 8)
 
-                    WalletCarousel(cards: cards)
+                    CoverFlowCarousel(cards: cards, selectedID: $selectedID)
+
+                    pageDots
+
+                    if let card = visibleCard {
+                        WalletDetailPanel(card: card)
+                            // Rebuilding on id change is what gives the panel
+                            // something to transition *between*.
+                            .id(card.id)
+                            .transition(panelTransition)
+                            .padding(.top, 18)
+                    }
 
                     Text("\(cards.count) pass\(cards.count == 1 ? "" : "es") · built from your screenshots")
                         .font(.footnote)
                         .foregroundStyle(CoveTheme.inkSecondary)
+                        .padding(.top, 14)
 
-                    Spacer(minLength: 0)
+                    Spacer(minLength: 8)
                 }
+                .padding(.horizontal, 20)
                 // The carousel is greedy, so the caption lands at the foot of
                 // the page — which is where the floating dock is drawn.
                 .padding(.bottom, CoveTabBar.occupiedHeight)
@@ -157,6 +264,61 @@ struct WalletView: View {
             .padding(.bottom, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            if selectedID == nil { selectedID = cards.first?.id }
+            if visibleID == nil { visibleID = selectedID }
+        }
+        // Direction is resolved first, then the swap is animated — otherwise
+        // the transition would read a stale edge and slide the wrong way.
+        .onChange(of: selectedID) { previous, current in
+            guard let current, current != visibleID else { return }
+            slideForward = index(of: current) >= index(of: previous)
+            withAnimation(
+                reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.78)
+            ) {
+                visibleID = current
+            }
+        }
+    }
+
+    /// Thumbnail, title, and facts travel as one block. The outgoing panel
+    /// shrinks, blurs, and fades as it recedes the way the finger went; the
+    /// incoming one scales up from 96% and sharpens into focus.
+    private var panelTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let travel: CGFloat = 46
+        return .asymmetric(
+            insertion: .modifier(
+                active: PanelPhase(
+                    dx: slideForward ? travel : -travel,
+                    blur: 6,
+                    scale: 0.96,
+                    opacity: 0
+                ),
+                identity: PanelPhase.settled
+            ),
+            removal: .modifier(
+                active: PanelPhase(
+                    dx: slideForward ? -travel : travel,
+                    blur: 6,
+                    scale: 0.94,
+                    opacity: 0
+                ),
+                identity: PanelPhase.settled
+            )
+        )
+    }
+
+    private var pageDots: some View {
+        HStack(spacing: 6) {
+            ForEach(cards) { card in
+                Capsule()
+                    .fill(CoveTheme.ink.opacity(card.id == visibleID ? 0.55 : 0.16))
+                    .frame(width: card.id == visibleID ? 18 : 6, height: 6)
+            }
+        }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.32), value: visibleID)
+        .accessibilityHidden(true)
     }
 
     private var emptyState: some View {
@@ -180,46 +342,296 @@ struct WalletView: View {
     }
 }
 
-// MARK: - 3D stacked carousel
+// MARK: - Cover Flow carousel
 
-/// Horizontal carousel where neighboring passes tilt away and slide behind
-/// the focused one — a wallet stack receding into depth.
-private struct WalletCarousel: View {
+/// Cover Flow: the active pass faces straight forward at full size while its
+/// neighbours tilt away around the vertical axis and sit back in depth.
+///
+/// Hand-driven rather than a paging `ScrollView` — the transform for every
+/// card is a pure function of its distance from centre, so it tracks the
+/// finger continuously instead of interpolating between fixed pages, and the
+/// release settles on a spring rather than the system's scroll deceleration.
+private struct CoverFlowCarousel: View {
     let cards: [WalletCard]
+    @Binding var selectedID: UUID?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Which pass is centred, and how far the finger has pulled away from it.
+    @State private var index = 0
+    @State private var drag: CGFloat = 0
+
+    static let cardHeight: CGFloat = 158
+
+    /// Turn angle of a card one full step off centre.
+    private static let maxAngle: Double = 42
+    /// Neighbours land at 82% — small enough to sit behind, large enough to
+    /// still read as a card rather than a chip.
+    private static let sideScale: CGFloat = 0.18
 
     var body: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: -34) {
-                ForEach(cards) { card in
-                    NavigationLink {
-                        ItemDetailView(item: card.item)
-                    } label: {
-                        WalletCardView(card: card)
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let cardWidth = min(width * 0.80, 340)
+            let step = cardWidth * 0.46
+            let progress = CGFloat(index) - drag / step
+
+            ZStack {
+                ForEach(Array(cards.enumerated()), id: \.element.id) { position, card in
+                    cover(card, distance: CGFloat(position) - progress, cardWidth: cardWidth, step: step)
+                }
+            }
+            .frame(width: width, height: Self.cardHeight)
+            .contentShape(.rect)
+            .gesture(swipe(step: step))
+        }
+        .frame(height: Self.cardHeight)
+        .padding(.vertical, 18)
+        .onAppear(perform: syncFromSelection)
+        .onChange(of: index) { _, new in
+            guard cards.indices.contains(new) else { return }
+            selectedID = cards[new].id
+        }
+    }
+
+    private func cover(
+        _ card: WalletCard,
+        distance: CGFloat,
+        cardWidth: CGFloat,
+        step: CGFloat
+    ) -> some View {
+        let clamped = max(-3, min(3, distance))
+        let magnitude = abs(clamped)
+        let side: CGFloat = clamped < 0 ? -1 : 1
+        let x = side * (min(magnitude, 1) * step + max(magnitude - 1, 0) * step * 0.42)
+        let angle = Double(max(-1, min(1, clamped))) * Self.maxAngle
+
+        return NavigationLink {
+            ItemDetailView(item: card.item)
+        } label: {
+            WalletCardView(card: card, height: Self.cardHeight)
+                .frame(width: cardWidth)
+        }
+        .buttonStyle(.plain)
+        .rotation3DEffect(
+            .degrees(angle),
+            axis: (x: 0, y: 1, z: 0),
+            anchor: .center,
+            perspective: 0.62
+        )
+        .scaleEffect(max(0.80, 1 - magnitude * Self.sideScale))
+        .offset(x: x)
+        .blur(radius: min(magnitude, 1.5) * 1.6)
+        .opacity(max(0.4, 1 - magnitude * 0.22))
+        .zIndex(10 - Double(magnitude))
+        .allowsHitTesting(magnitude < 0.5)
+    }
+
+    private func swipe(step: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                drag = value.translation.width
+            }
+            .onEnded { value in
+                let projected = value.predictedEndTranslation.width
+                let steps = Int(max(-2, min(2, (-projected / step).rounded())))
+                let target = min(max(index + steps, 0), max(cards.count - 1, 0))
+                withAnimation(
+                    reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.78)
+                ) {
+                    index = target
+                    drag = 0
+                }
+            }
+    }
+
+    private func syncFromSelection() {
+        if let selectedID, let found = cards.firstIndex(where: { $0.id == selectedID }) {
+            index = found
+        } else if let first = cards.first {
+            selectedID = first.id
+            index = 0
+        }
+    }
+}
+
+private struct PanelPhase: ViewModifier {
+    let dx: CGFloat
+    let blur: CGFloat
+    let scale: CGFloat
+    let opacity: Double
+
+    static let settled = PanelPhase(dx: 0, blur: 0, scale: 1, opacity: 1)
+
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(scale)
+            .blur(radius: blur)
+            .opacity(opacity)
+            .offset(x: dx)
+    }
+}
+
+// MARK: - Detail panel
+
+private struct WalletDetailPanel: View {
+    let card: WalletCard
+
+    /// The one-line summary the pipeline wrote for this capture. Falls back to
+    /// the start of the extracted text so the paragraph is never empty on an
+    /// item the language model never got to.
+    private var blurb: String? {
+        if let summary = card.item.summary?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !summary.isEmpty {
+            return summary
+        }
+        guard let text = card.item.extractedText?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " "),
+              !text.isEmpty else { return nil }
+        return String(text.prefix(160))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                if card.item.imageData != nil {
+                    ShelfThumbnail(item: card.item)
+                        .frame(width: 62, height: 62)
+                        .clipShape(.rect(cornerRadius: 13))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 13)
+                                .strokeBorder(CoveTheme.hairline, lineWidth: 1)
+                        }
+                        .accessibilityLabel("Original screenshot")
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(card.title)
+                        .font(.system(.title3, design: .serif, weight: .bold))
+                        .foregroundStyle(CoveTheme.ink)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if let subtitle = card.subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.footnote)
+                            .foregroundStyle(CoveTheme.inkSecondary)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    .buttonStyle(.plain)
-                    .containerRelativeFrame(.horizontal) { length, _ in
-                        length * 0.80
-                    }
-                    .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                        content
-                            .rotation3DEffect(
-                                .degrees(phase.value * -32),
-                                axis: (x: 0, y: 1, z: 0),
-                                perspective: 0.55
-                            )
-                            .scaleEffect(1 - abs(phase.value) * 0.16)
-                            .offset(x: phase.value * -18, y: abs(phase.value) * 12)
-                            .opacity(1 - abs(phase.value) * 0.28)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if card.details.isEmpty {
+                Text("Nothing else was readable in this capture.")
+                    .font(.caption)
+                    .foregroundStyle(CoveTheme.inkSecondary)
+            } else {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 10, alignment: .topLeading),
+                        GridItem(.flexible(), spacing: 10, alignment: .topLeading)
+                    ],
+                    alignment: .leading,
+                    spacing: 10
+                ) {
+                    ForEach(card.details.prefix(4)) { detail in
+                        fact(detail)
                     }
                 }
             }
-            .scrollTargetLayout()
-            .padding(.vertical, 30)
+
+            if let blurb {
+                Text(blurb)
+                    .font(.footnote)
+                    .foregroundStyle(CoveTheme.inkSecondary)
+                    .lineSpacing(2)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            openButton
         }
-        .scrollTargetBehavior(.viewAligned)
-        .scrollIndicators(.hidden)
-        .contentMargins(.horizontal, 38, for: .scrollContent)
-        .scrollClipDisabled()
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minHeight: 132, alignment: .top)
+        .background(.white.opacity(0.6), in: .rect(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22)
+                .strokeBorder(CoveTheme.hairline, lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.07), radius: 8, y: 4)
+    }
+
+    /// Full-width call to action closing the panel, the way a product card
+    /// ends in its one obvious next step.
+    private var openButton: some View {
+        NavigationLink {
+            ItemDetailView(item: card.item)
+        } label: {
+            HStack(spacing: 6) {
+                Text("More details")
+                    .font(.subheadline.weight(.semibold))
+                Image(systemName: "arrow.up.right")
+                    .font(.caption.weight(.bold))
+            }
+            .foregroundStyle(CoveTheme.background)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(CoveTheme.ink, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .accessibilityLabel("More details about \(card.title)")
+        .accessibilityHint("Opens the original screenshot and everything Cove read from it")
+    }
+
+    private func fact(_ detail: WalletCard.Detail) -> some View {
+        HStack(alignment: .top, spacing: 5) {
+            Image(systemName: detail.systemImage)
+                .font(.caption2)
+                .foregroundStyle(card.style.accent)
+                .frame(width: 13)
+                .padding(.top, 7)
+
+            VStack(alignment: .leading, spacing: 0) {
+                Text(detail.label.uppercased())
+                    .font(.system(size: 8, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(CoveTheme.inkSecondary)
+                Text(detail.value)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(CoveTheme.ink)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(detail.label): \(detail.value)")
+    }
+}
+
+// MARK: - Lift
+
+private struct PassShadow: ViewModifier {
+    var lift: CGFloat = 1
+
+    func body(content: Content) -> some View {
+        content
+            .shadow(color: .black.opacity(0.20 * min(lift, 1.4)), radius: 3 * lift, y: 2 * lift)
+            .shadow(color: .black.opacity(0.22 * min(lift, 1.4)), radius: 22 * lift, y: 16 * lift)
+    }
+}
+
+private extension View {
+    func passShadow(lift: CGFloat = 1) -> some View {
+        modifier(PassShadow(lift: lift))
     }
 }
 
@@ -227,174 +639,266 @@ private struct WalletCarousel: View {
 
 struct WalletCardView: View {
     let card: WalletCard
-    /// Passes render at deck size by default; the popped-out single-pass
-    /// view asks for a taller card.
-    var height: CGFloat = 212
+    var height: CGFloat = 158
+    var cornerRadius: CGFloat = 20
+    var showsShadow: Bool = true
+
+    private static let stubWidth: CGFloat = 116
+
+    private var outline: TicketShape {
+        TicketShape(cornerRadius: cornerRadius, notchRadius: 8, stubInset: Self.stubWidth)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                Label(card.style.label, systemImage: card.style.systemImage)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-
-                Spacer()
-
-                if card.item.imageData != nil {
-                    ShelfThumbnail(item: card.item)
-                        .frame(width: 40, height: 40)
-                        .clipShape(.rect(cornerRadius: 10))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 10)
-                                .strokeBorder(.white.opacity(0.35), lineWidth: 1)
-                        }
-                }
-            }
-
-            Spacer(minLength: 10)
-
-            Text(card.title)
-                .font(.system(.title2, design: .serif, weight: .semibold))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .minimumScaleFactor(0.7)
-
-            if let subtitle = card.subtitle, !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.75))
-                    .lineLimit(1)
-                    .padding(.top, 2)
-            }
-
-            perforation
-                .padding(.vertical, 14)
-
-            HStack(alignment: .firstTextBaseline) {
-                field(label: card.primaryLabel, value: card.primaryValue)
-                Spacer()
-                field(label: card.secondaryLabel, value: card.secondaryValue, alignment: .trailing)
-            }
+        HStack(spacing: 0) {
+            printedHalf
+            tearLine
+            stub
         }
-        .padding(20)
         .frame(height: height)
-        .background {
-            LinearGradient(
-                colors: card.style.gradient,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .overlay(alignment: .topTrailing) {
-            // Soft sheen so the pass reads as a physical card.
-            LinearGradient(
-                colors: [.white.opacity(0.16), .clear],
-                startPoint: .topLeading,
-                endPoint: UnitPoint(x: 0.5, y: 0.6)
-            )
-            .allowsHitTesting(false)
-        }
-        .clipShape(.rect(cornerRadius: 22))
+        .background { stock }
+        .clipShape(outline)
         .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+            outline.stroke(.white.opacity(0.55), lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.28), radius: 16, y: 10)
+        .passShadow(lift: showsShadow ? 1 : 0)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(card.style.label): \(card.title), \(card.primaryLabel) \(card.primaryValue)")
     }
 
-    private var perforation: some View {
-        HStack(spacing: 0) {
-            Circle()
-                .fill(CoveTheme.background)
-                .frame(width: 16, height: 16)
-                .offset(x: -28)
-
-            Line()
-                .stroke(style: StrokeStyle(lineWidth: 1.4, dash: [5, 5]))
-                .foregroundStyle(.white.opacity(0.4))
-                .frame(height: 1.4)
-
-            Circle()
-                .fill(CoveTheme.background)
-                .frame(width: 16, height: 16)
-                .offset(x: 28)
-        }
-        .frame(height: 16)
-        .padding(.horizontal, -28)
-    }
-
-    private func field(label: String, value: String, alignment: HorizontalAlignment = .leading) -> some View {
-        VStack(alignment: alignment, spacing: 3) {
-            Text(label.uppercased())
-                .font(.caption2.weight(.bold))
-                .tracking(1.1)
-                .foregroundStyle(.white.opacity(0.6))
-            Text(value)
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(.white)
+    private var printedHalf: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(card.style.label.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .tracking(1.3)
+                .foregroundStyle(card.style.ink.opacity(0.62))
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
+                .frame(height: 28, alignment: .center)
+
+            Spacer(minLength: 6)
+
+            Text(card.title)
+                .font(.system(.subheadline, design: .serif, weight: .bold))
+                .foregroundStyle(card.style.ink)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(card.primaryValue)
+                .font(.caption)
+                .foregroundStyle(card.style.ink.opacity(0.78))
+                .lineLimit(1)
+                .padding(.top, 3)
+
+            if let subtitle = card.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(card.style.ink.opacity(0.6))
+                    .lineLimit(1)
+            }
         }
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
+        .padding(.top, 12)
+        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private struct Line: Shape {
+    private var tearLine: some View {
+        TearLine()
+            .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
+            .foregroundStyle(card.style.ink.opacity(0.3))
+            .frame(width: 1.2)
+            .padding(.vertical, 14)
+    }
+
+    private var stub: some View {
+        VStack(spacing: 6) {
+            if card.item.imageData != nil {
+                ShelfThumbnail(item: card.item)
+                    .frame(height: 40)
+                    // Screenshots are the most saturated thing on a pastel
+                    // ticket, and at this size they carry almost no readable
+                    // information — so they get pulled toward the card's own
+                    // colour rather than sitting on it like a sticker.
+                    .saturation(0.55)
+                    .overlay(card.style.gradient[0].opacity(0.22))
+                    .clipShape(.rect(cornerRadius: 8))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(.white.opacity(0.65), lineWidth: 1)
+                    }
+            }
+
+            ForEach(stubFacts) { fact in
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(fact.label.uppercased())
+                        .font(.system(size: 7.5, weight: .bold))
+                        .tracking(0.5)
+                        .foregroundStyle(card.style.ink.opacity(0.55))
+                    Text(fact.value)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(card.style.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 12)
+        .frame(width: Self.stubWidth)
+    }
+
+    private var stubFacts: [WalletCard.Detail] {
+        Array(card.details.prefix(card.item.imageData == nil ? 3 : 2))
+    }
+
+    private var stock: some View {
+        LinearGradient(
+            colors: card.style.gradient,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            Image(systemName: card.style.systemImage)
+                .font(.system(size: 104, weight: .light))
+                .foregroundStyle(.white.opacity(0.18))
+                .rotationEffect(.degrees(-12))
+                .offset(x: 74, y: 4)
+        }
+        .overlay(alignment: .top) {
+            LinearGradient(
+                colors: [.white.opacity(0.42), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 26)
+        }
+        .allowsHitTesting(false)
+    }
+
+    private struct TearLine: Shape {
         func path(in rect: CGRect) -> Path {
             var path = Path()
-            path.move(to: CGPoint(x: rect.minX, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+            path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
             return path
         }
     }
 }
 
+private struct TicketShape: Shape {
+    var cornerRadius: CGFloat = 20
+    var notchRadius: CGFloat = 8
+    var stubInset: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let tearX = rect.maxX - stubInset
+        let body = Path(roundedRect: rect, cornerRadius: cornerRadius)
+
+        var notches = Path()
+        notches.addEllipse(
+            in: CGRect(
+                x: tearX - notchRadius,
+                y: rect.minY - notchRadius,
+                width: notchRadius * 2,
+                height: notchRadius * 2
+            )
+        )
+        notches.addEllipse(
+            in: CGRect(
+                x: tearX - notchRadius,
+                y: rect.maxY - notchRadius,
+                width: notchRadius * 2,
+                height: notchRadius * 2
+            )
+        )
+        return body.subtracting(notches)
+    }
+}
+
 // MARK: - Single pass
 
-/// One pass pulled out of the deck and held alone over a blurred shelf: the
-/// card at full size, the screenshot it came from underneath. Dismisses on a
-/// downward drag, a tap outside the card, or the close button.
 struct WalletPassDetailView: View {
     let card: WalletCard
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dragOffset: CGFloat = 0
+    /// Drives the staged open: shadow, then backdrop, then the card itself.
+    @State private var expanded = false
+    /// Detail content waits for the card to finish before arriving.
+    @State private var detailsIn = false
+
+    /// Past this much downward travel the drag counts as a dismiss.
+    private static let dismissThreshold: CGFloat = 130
+
+    /// How far through a dismiss drag we are, 0…1.
+    private var dragProgress: CGFloat {
+        min(max(dragOffset, 0) / Self.dismissThreshold, 1)
+    }
+
+    private func stage(_ delay: Double) -> Animation? {
+        reduceMotion ? nil : .spring(response: 0.46, dampingFraction: 0.78).delay(delay)
+    }
 
     var body: some View {
         ZStack {
-            // The blur is the whole background: the home page stays visible
-            // behind it, softened, so the pass reads as lifted off the page.
             Rectangle()
                 .fill(.ultraThinMaterial)
+                .opacity(expanded ? 1 : 0)
+                .animation(stage(0.06), value: expanded)
                 .ignoresSafeArea()
                 .contentShape(.rect)
                 .onTapGesture { dismiss() }
 
-            // minHeight centers a short pass on the page and still lets a
-            // tall screenshot scroll.
             GeometryReader { proxy in
                 ScrollView {
                     VStack(spacing: 20) {
-                        WalletCardView(card: card, height: 248)
+                        WalletCardView(
+                            card: card,
+                            height: 196,
+                            cornerRadius: expanded ? 14 : 24,
+                            showsShadow: false
+                        )
+                        .scaleEffect(expanded ? 1 : 0.92)
+                        .animation(stage(0.10), value: expanded)
+                        .passShadow(lift: expanded ? 1.3 : 0.45)
+                        .animation(stage(0), value: expanded)
+                        .gesture(dismissDrag)
 
-                        if card.item.imageData != nil {
-                            sourceShot
+                        Group {
+                            if card.item.imageData != nil {
+                                sourceShot
+                            }
+
+                            caption
                         }
-
-                        caption
+                        .opacity(detailsIn ? 1 : 0)
+                        .offset(y: detailsIn ? 0 : 16)
+                        .blur(radius: detailsIn ? 0 : 4)
+                        .animation(stage(0), value: detailsIn)
                     }
                     .padding(.horizontal, 24)
                     .padding(.vertical, 28)
                     .frame(minHeight: proxy.size.height, alignment: .center)
-                    // No drag-to-dismiss offset here on purpose. The zoom
-                    // transition runs its own interactive dismiss and returns
-                    // the pass to the frame it was presented from; shifting
-                    // the content ourselves and then calling dismiss() left
-                    // that return starting from a displaced frame, which is
-                    // what made the pass land off the fan.
+                    .offset(y: max(dragOffset, 0))
+                    .scaleEffect(1 - dragProgress * 0.06)
+                    .blur(radius: dragProgress * 4)
+                    .opacity(1 - dragProgress * 0.35)
                 }
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
             }
+        }
+        .task {
+            expanded = true
+            guard !reduceMotion else {
+                detailsIn = true
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(360))
+            detailsIn = true
         }
         .overlay(alignment: .topTrailing) {
             Button {
@@ -413,7 +917,22 @@ struct WalletPassDetailView: View {
         }
     }
 
-    /// The capture the pass was extracted from — the pass's "original".
+    private var dismissDrag: some Gesture {
+        DragGesture(minimumDistance: 12)
+            .onChanged { value in
+                dragOffset = value.translation.height
+            }
+            .onEnded { value in
+                if value.translation.height > Self.dismissThreshold {
+                    dismiss()
+                } else {
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                        dragOffset = 0
+                    }
+                }
+            }
+    }
+
     private var sourceShot: some View {
         ShelfThumbnail(item: card.item)
             .frame(height: 260)

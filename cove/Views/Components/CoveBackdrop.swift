@@ -77,7 +77,7 @@ struct CoveGradientBackdrop: View {
                 ShaderLibrary.coveEventFlow(
                     .float2(size),
                     .float(loop),
-                    .float4(palette.hue, palette.spread, palette.saturation, palette.valueStep),
+                    .float4(palette.cycledHue(at: loop), palette.spread, palette.saturation, palette.valueStep),
                     .float4(palette.phase, palette.spin, palette.ratio, palette.warp),
                     .float4(palette.falloff, palette.radius, palette.harmonic, palette.hueTurns)
                 )
@@ -98,8 +98,10 @@ struct CoveGradientBackdrop: View {
 /// `Hasher` is deliberately avoided: Swift salts it per process, so it would
 /// not survive a relaunch either.
 struct CoveGradientPalette {
-    /// Where the palette sits on the wheel.
+    /// Where the palette sits on the wheel at rest.
     var hue: Float
+    /// Which of the anchor families this surface starts on.
+    let anchorIndex: Int
     /// Arc between the three stops. Low is near-monochrome, high throws them
     /// apart into complementary territory — the main source of variety.
     var spread: Float
@@ -155,9 +157,19 @@ struct CoveGradientPalette {
             Float(min(Int(generator.next() * Double(count)), count - 1))
         }
 
-        hue = roll(0, 1)
-        spread = roll(0.05, 0.34)
-        saturation = roll(0.24, 0.44)
+        // Anchored, not free. Rolling the hue across the whole wheel gave every
+        // card an unrelated colour, and a page of them read as noise. Four
+        // fixed families keep the set coherent while still telling cards apart.
+        anchorIndex = Int(pick(Self.hueAnchors.count))
+        hue = Self.hueAnchors[anchorIndex]
+        // Tight. The shader lays the three stops at hue, hue+spread and
+        // hue+2·spread, so the *span* is double whatever goes here — at the old
+        // 0.16 a card covered a third of the wheel by itself and drifted well
+        // off the family it was anchored to.
+        spread = roll(0.03, 0.08)
+        // Pastel, to sit with the wallet's ticket stock rather than shouting
+        // over it.
+        saturation = roll(0.16, 0.30)
         valueStep = roll(0.02, 0.10)
 
         phase = roll(0, 1)
@@ -168,11 +180,54 @@ struct CoveGradientPalette {
         falloff = roll(9, 20)
         radius = roll(0.30, 0.46)
         harmonic = 1 + pick(3)
-        hueTurns = pick(2)
+        // The shader's own sweep stays off — it walks the *whole* wheel, which
+        // is what made the page look like a paint box. The cycle is driven from
+        // `cycledHue(at:)` instead, which only ever moves between neighbouring
+        // anchors.
+        hueTurns = 0
 
         if let chosenHue { hue = chosenHue }
         if let chosenSpread { spread = chosenSpread }
         if let chosenTurns { hueTurns = chosenTurns }
+    }
+
+    /// The families a card can land on, as positions on the colour wheel.
+    /// Matched to the wallet's ticket stock — lime, mint, periwinkle, lavender
+    /// — so Upcoming and the passes read as one palette instead of two.
+    private static let hueAnchors: [Float] = [0.22, 0.44, 0.66, 0.80]
+
+    /// Fraction of each segment spent sitting on a colour before easing to the
+    /// next. High, because the point is to *be* four colours, not to be a
+    /// continuous fade that happens to pass through them.
+    private static let hold: Float = 0.72
+
+    /// Where this surface's colour sits at a point in the loop.
+    ///
+    /// Walks the anchors in order, starting from this card's own — so the loop
+    /// visits four colours and returns, and two cards on screen are rarely on
+    /// the same one. Interpolation is always between *neighbouring* anchors, so
+    /// the surface can never wander into the hues the palette excludes.
+    func cycledHue(at loop: Float) -> Float {
+        let anchors = Self.hueAnchors
+        let count = anchors.count
+
+        let position = loop * Float(count) + Float(anchorIndex)
+        let index = Int(position.rounded(.down))
+        let progress = position - position.rounded(.down)
+
+        let from = anchors[((index % count) + count) % count]
+        let to = anchors[((index + 1) % count + count) % count]
+
+        // Hold, then a smoothstep across the remainder.
+        let raw = max(0, progress - Self.hold) / (1 - Self.hold)
+        let eased = raw * raw * (3 - 2 * raw)
+
+        // Shortest way round the wheel, so lime → lavender doesn't sweep back
+        // through everything between them.
+        var delta = to - from
+        if delta > 0.5 { delta -= 1 }
+        if delta < -0.5 { delta += 1 }
+        return from + delta * eased
     }
 
     /// splitmix64 finalizer over the raw UUID bytes. The avalanche matters —

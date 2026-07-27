@@ -33,6 +33,11 @@ enum WalletSeeder {
                 processingState: .ready
             )
             item.extraction = seed.extraction
+            // What OCR would have pulled off the rendered pass. Without it the
+            // demo passes have nothing for the wallet panel's blurb to show.
+            item.extractedText = seed.lines
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
             item.isInWallet = true
             context.insert(item)
         }
