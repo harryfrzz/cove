@@ -285,7 +285,7 @@ private struct EventCard: View {
         // the body text readable, which left a white numeral with nothing to
         // sit against — on the paler rolls it broke up into disconnected
         // shapes. A dark tint is legible against all of them.
-        .foregroundStyle(CoveTheme.ink.opacity(0.15))
+        .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.15))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         // Overhangs enough to crop, not so much that the digits lose the
         // curves that identify them.
@@ -302,12 +302,12 @@ private struct EventCard: View {
             Text(countdown.uppercased())
                 .font(.system(size: 10, weight: .bold))
                 .tracking(1.4)
-                .foregroundStyle(CoveTheme.ink.opacity(0.5))
+                .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.5))
                 .lineLimit(1)
 
             Text(displayTitle)
                 .font(.system(size: 19, weight: .bold, design: .serif))
-                .foregroundStyle(CoveTheme.ink)
+                .foregroundStyle(CoveTheme.inkOnArtwork)
                 .lineLimit(3)
                 .multilineTextAlignment(.leading)
                 .minimumScaleFactor(0.82)
@@ -322,11 +322,11 @@ private struct EventCard: View {
                     Text(date.formatted(.dateTime.month(.abbreviated)).uppercased())
                         .font(.system(size: 13, weight: .black))
                         .tracking(1.8)
-                        .foregroundStyle(CoveTheme.ink.opacity(0.72))
+                        .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.72))
                 }
                 Text(footnote)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CoveTheme.ink.opacity(0.55))
+                    .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.55))
                     .lineLimit(2)
                     .multilineTextAlignment(.trailing)
             }

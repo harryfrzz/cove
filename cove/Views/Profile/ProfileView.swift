@@ -28,6 +28,10 @@ struct ProfileView: View {
     /// that would claim you'd been using Cove since whenever you took them.
     @AppStorage("profileStartedAt") private var startedAt: Double = 0
 
+    /// Read by the shell, set here — the one place in Cove that is a setting
+    /// rather than a piece of the shelf.
+    @AppStorage(CoveAppearance.storageKey) private var appearance = CoveAppearance.system
+
     /// Which pebble is currently expanded, if any.
     @State private var openBucket: ShelfBucket?
     /// Shared by every glass shape on the page, so they can morph into one
@@ -364,9 +368,41 @@ struct ProfileView: View {
                 .padding(16)
                 .glassEffect(.regular, in: .rect(cornerRadius: 24))
 
+                appearanceControl
                 libraryControl
             }
         }
+    }
+
+    /// Light, dark, or whatever the phone is doing. Sits with the other two
+    /// footer rows because it is the same kind of thing: a switch for the app,
+    /// not a view of the shelf.
+    private var appearanceControl: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: appearance.systemImage)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(CoveTheme.ink.opacity(0.75))
+                    .frame(width: 22)
+                    .contentTransition(.symbolEffect(.replace))
+
+                Text("Appearance")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(CoveTheme.ink)
+
+                Spacer(minLength: 0)
+            }
+
+            Picker("Appearance", selection: $appearance) {
+                ForEach(CoveAppearance.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(16)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 
     @ViewBuilder

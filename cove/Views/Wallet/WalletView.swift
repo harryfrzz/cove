@@ -133,6 +133,9 @@ struct WalletView: View {
 
                     Spacer(minLength: 0)
                 }
+                // The carousel is greedy, so the caption lands at the foot of
+                // the page — which is where the floating dock is drawn.
+                .padding(.bottom, CoveTabBar.occupiedHeight)
             }
         }
         // Cove's own header rather than the system navigation bar: Wallet was

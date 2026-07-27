@@ -15,6 +15,8 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
 
+    @AppStorage(CoveAppearance.storageKey) private var appearance = CoveAppearance.system
+
     @State private var tab: CoveTab = .home
     @State private var addMode: AddCaptureMode?
     @State private var isShowingCamera = false
@@ -44,7 +46,10 @@ struct ContentView: View {
                 )
             }
         }
-        .preferredColorScheme(.light)
+        // Follows the system unless the profile page says otherwise. Applied
+        // at the shell so sheets and full-screen covers presented from here
+        // inherit it too.
+        .preferredColorScheme(appearance.colorScheme)
         .safeAreaInset(edge: .bottom) {
             CoveTabBar(
                 selection: $tab,
