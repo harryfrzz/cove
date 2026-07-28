@@ -2,8 +2,18 @@
 import SwiftData
 import UIKit
 
-/// Demo-only seeder (`--seed-wallet` launch argument): inserts a handful of
-/// ready-made receipt/ticket passes so the wallet carousel has depth to show.
+/// Demo-only seeder: inserts a handful of ready-made receipt/ticket passes so
+/// the wallet carousel has depth to show.
+///
+/// On the **simulator** this runs on every debug launch, because a simulator
+/// has no real camera roll to build passes from — an empty wallet there tells
+/// you nothing about the UI. On a **real device** it stays behind the
+/// `--seed-wallet` argument, so debugging on your own phone never injects fake
+/// receipts alongside your actual captures. `--no-seed-wallet` opts out
+/// anywhere.
+///
+/// Seeding is idempotent: the tag check makes every run after the first a
+/// no-op, so this costs one fetch on launch and nothing else.
 @MainActor
 enum WalletSeeder {
     private static let seedTag = "seed-pass"
@@ -16,7 +26,15 @@ enum WalletSeeder {
     }
 
     static func seedIfRequested() {
-        guard ProcessInfo.processInfo.arguments.contains("--seed-wallet") else { return }
+        let arguments = ProcessInfo.processInfo.arguments
+        guard !arguments.contains("--no-seed-wallet") else { return }
+
+#if targetEnvironment(simulator)
+        let shouldSeed = true
+#else
+        let shouldSeed = arguments.contains("--seed-wallet")
+#endif
+        guard shouldSeed else { return }
 
         let context = ModelContext(CoveStore.shared)
         let already = ((try? context.fetch(FetchDescriptor<ShelfItem>())) ?? [])

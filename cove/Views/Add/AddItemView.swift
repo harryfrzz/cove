@@ -28,8 +28,11 @@ struct AddItemView: View {
 
     @State private var mode: CaptureMode
     @State private var imageKind: ShelfItemKind = .screenshot
-    @State private var selectedPhoto: PhotosPickerItem?
-    @State private var selectedImageData: Data?
+    @State private var selectedPhotos: [PhotosPickerItem] = []
+    /// Decoded in pick order, so the previews and the saved items match the
+    /// order the picker numbered them in.
+    @State private var selectedImages: [Data] = []
+    @State private var isLoadingPhotos = false
     @State private var title = ""
     @State private var userNote = ""
     @State private var linkText = ""
@@ -76,7 +79,7 @@ struct AddItemView: View {
                 }
 
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: addItem)
+                    Button(addButtonTitle, action: addItem)
                         .disabled(!canAdd)
                 }
             }
@@ -85,23 +88,11 @@ struct AddItemView: View {
             } message: {
                 Text(photoLoadError ?? "Please choose another image.")
             }
-            .onChange(of: selectedPhoto) { _, newPhoto in
-                guard let newPhoto else {
-                    selectedImageData = nil
-                    return
-                }
-
-                Task {
-                    do {
-                        selectedImageData = try await newPhoto.loadTransferable(type: Data.self)
-                        if selectedImageData == nil {
-                            photoLoadError = "The selected asset didn’t provide image data."
-                        }
-                    } catch {
-                        selectedImageData = nil
-                        photoLoadError = error.localizedDescription
-                    }
-                }
+            // `task(id:)` rather than `onChange`: reopening the picker while a
+            // previous batch is still decoding cancels that load instead of
+            // letting the two race to assign `selectedImages`.
+            .task(id: selectedPhotos) {
+                await loadSelectedPhotos()
             }
             .onChange(of: mode) { _, _ in
                 title = ""
@@ -117,31 +108,27 @@ struct AddItemView: View {
     private var captureFields: some View {
         switch mode {
         case .photo:
-            Section("Screenshot or image") {
+            Section(selectedImages.count > 1 ? "Screenshots or images" : "Screenshot or image") {
                 Picker("Kind", selection: $imageKind) {
                     Text("Screenshot").tag(ShelfItemKind.screenshot)
                     Text("Image").tag(ShelfItemKind.image)
                 }
                 .pickerStyle(.segmented)
 
-                PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    Label(
-                        selectedImageData == nil ? "Choose from Photos" : "Choose a different photo",
-                        systemImage: "photo.on.rectangle"
-                    )
-                    .frame(maxWidth: .infinity)
+                // `.ordered` numbers the selection as it's made, so the badges
+                // in the picker match the order these get saved in.
+                PhotosPicker(
+                    selection: $selectedPhotos,
+                    maxSelectionCount: nil,
+                    selectionBehavior: .ordered,
+                    matching: .images
+                ) {
+                    Label(photoPickerTitle, systemImage: "photo.on.rectangle")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.glass)
 
-                if let selectedImageData, let image = UIImage(data: selectedImageData) {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 240)
-                        .frame(maxWidth: .infinity)
-                        .clipShape(.rect(cornerRadius: 18))
-                        .accessibilityLabel("Selected image preview")
-                }
+                photoPreview
             }
 
         case .link:
@@ -175,9 +162,109 @@ struct AddItemView: View {
         }
     }
 
+    // MARK: - Photos
+
+    private var photoPickerTitle: String {
+        switch selectedImages.count {
+        case 0: "Choose from Photos"
+        case 1: "Choose different photos"
+        case let count: "\(count) photos selected · change"
+        }
+    }
+
+    private var addButtonTitle: String {
+        mode == .photo && selectedImages.count > 1 ? "Add \(selectedImages.count)" : "Add"
+    }
+
+    @ViewBuilder
+    private var photoPreview: some View {
+        if isLoadingPhotos {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Loading \(selectedPhotos.count) photo\(selectedPhotos.count == 1 ? "" : "s")…")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if selectedImages.count == 1, let image = UIImage(data: selectedImages[0]) {
+            // A single pick still gets the full-size preview it always had.
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxHeight: 240)
+                .frame(maxWidth: .infinity)
+                .clipShape(.rect(cornerRadius: 18))
+                .accessibilityLabel("Selected image preview")
+        } else if !selectedImages.isEmpty {
+            ScrollView(.horizontal) {
+                HStack(spacing: 10) {
+                    ForEach(Array(selectedImages.enumerated()), id: \.offset) { index, data in
+                        if let image = UIImage(data: data) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 92, height: 92)
+                                .clipShape(.rect(cornerRadius: 12))
+                                .overlay(alignment: .topLeading) {
+                                    Text("\(index + 1)")
+                                        .font(.caption2.weight(.bold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(.black.opacity(0.45), in: Capsule())
+                                        .padding(5)
+                                }
+                                .accessibilityLabel("Selected image \(index + 1) of \(selectedImages.count)")
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+        }
+    }
+
+    /// Decodes the picked assets in order. Partial failures keep whatever did
+    /// load rather than throwing the whole batch away — one unreadable asset
+    /// shouldn't cost the user the other nine.
+    private func loadSelectedPhotos() async {
+        guard !selectedPhotos.isEmpty else {
+            selectedImages = []
+            return
+        }
+
+        isLoadingPhotos = true
+        defer { isLoadingPhotos = false }
+
+        var loaded: [Data] = []
+        var failures = 0
+
+        for photo in selectedPhotos {
+            guard !Task.isCancelled else { return }
+            do {
+                if let data = try await photo.loadTransferable(type: Data.self) {
+                    loaded.append(data)
+                } else {
+                    failures += 1
+                }
+            } catch {
+                failures += 1
+            }
+        }
+
+        guard !Task.isCancelled else { return }
+        selectedImages = loaded
+
+        if failures > 0 {
+            photoLoadError = loaded.isEmpty
+                ? "None of the selected photos provided image data."
+                : "\(failures) of \(selectedPhotos.count) photos couldn’t be read. The rest are ready to add."
+        }
+    }
+
     private var canAdd: Bool {
         switch mode {
-        case .photo: selectedImageData != nil
+        case .photo: !selectedImages.isEmpty && !isLoadingPhotos
         case .link: normalizedURL != nil
         case .note: !noteText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
@@ -205,19 +292,32 @@ struct AddItemView: View {
     }
 
     private func addItem() {
-        let item: ShelfItem
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedNote = userNote.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // A photo capture can now produce several items, so the whole thing
+        // works in batches — the other two modes just make a batch of one.
+        let item: ShelfItem
+
         switch mode {
         case .photo:
-            item = ShelfItem(
-                kind: imageKind,
-                title: trimmedTitle.isEmpty ? "Saved \(imageKind.label.lowercased())" : trimmedTitle,
-                userNote: trimmedNote.nilIfEmpty,
-                imageData: selectedImageData,
-                processingState: .queued
-            )
+            let base = trimmedTitle.isEmpty
+                ? "Saved \(imageKind.label.lowercased())"
+                : trimmedTitle
+            let items = selectedImages.enumerated().map { index, data in
+                ShelfItem(
+                    kind: imageKind,
+                    // Numbered only when there's more than one, so a single
+                    // pick still reads as it always did.
+                    title: selectedImages.count == 1 ? base : "\(base) \(index + 1)",
+                    userNote: trimmedNote.nilIfEmpty,
+                    imageData: data,
+                    processingState: .queued
+                )
+            }
+            guard !items.isEmpty else { return }
+            save(items)
+            return
 
         case .link:
             guard let url = normalizedURL else { return }
@@ -244,12 +344,21 @@ struct AddItemView: View {
             )
         }
 
-        modelContext.insert(item)
+        save([item])
+    }
+
+    /// Inserts a batch, saves once, and queues each for processing.
+    private func save(_ items: [ShelfItem]) {
+        for item in items {
+            modelContext.insert(item)
+        }
         try? modelContext.save()
 
-        let itemID = item.id
+        let ids = items.map(\.id)
         Task {
-            await ShelfProcessor.shared.enqueue(itemID: itemID)
+            for id in ids {
+                await ShelfProcessor.shared.enqueue(itemID: id)
+            }
         }
         didSubmit = true
         dismiss()
