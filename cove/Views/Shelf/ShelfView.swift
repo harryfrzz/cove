@@ -13,6 +13,8 @@ struct ShelfView: View {
     @State private var query = ""
     @State private var results: [ShelfItem] = []
     @State private var isSearching = false
+    /// `nil` until a long press starts a selection on the results wall.
+    @State private var selection: Set<UUID>?
     @State private var errorMessage: String?
     @FocusState private var isFieldFocused: Bool
 
@@ -72,6 +74,16 @@ struct ShelfView: View {
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
+            // Sits above the floating dock rather than replacing it — the dock
+            // is an inset on the shell, so this stacks on top of it.
+            .safeAreaInset(edge: .bottom) {
+                if selection != nil {
+                    SelectionActionBar(selection: $selection, items: results)
+                        .padding(.bottom, 6)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .animation(.smooth(duration: 0.28), value: selection == nil)
         }
         .task(id: query) {
             await performSearch()
@@ -89,7 +101,7 @@ struct ShelfView: View {
             noMatches
                 .padding(.top, 60)
         } else {
-            MasonryWall(items: results)
+            MasonryWall(items: results, selection: $selection)
                 .padding(.horizontal, 14)
                 .padding(.top, 8)
                 .padding(.bottom, 24)

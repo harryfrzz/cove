@@ -5,9 +5,13 @@ import UIKit
 struct ItemDetailView: View {
     let item: ShelfItem
 
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+
     @State private var isShowingChat = false
     @State private var stubAction = ""
     @State private var isShowingStubAlert = false
+    @State private var isConfirmingDelete = false
 
     var body: some View {
         ScrollView {
@@ -142,6 +146,31 @@ struct ItemDetailView: View {
             .padding(.bottom, 20)
         }
         .background { CoveInkBackground() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    isConfirmingDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .accessibilityLabel("Delete item")
+            }
+        }
+        // Confirmation rather than undo: the capture is gone for good, and a
+        // transient toast is the wrong affordance for something unrecoverable.
+        .confirmationDialog(
+            "Delete this item?",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                modelContext.deleteShelfItems([item])
+                dismiss()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The screenshot and everything Cove read from it are removed from this device. This can't be undone.")
+        }
         .navigationTitle(item.title)
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $isShowingChat) {
