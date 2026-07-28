@@ -20,6 +20,8 @@ struct ProfileView: View {
     var onOpenWallet: () -> Void = {}
 
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
+    @Environment(\.modelContext) private var modelContext
+    @State private var isConfirmingEraseAll = false
     @State private var categorizer = ShelfCategorizer.shared
     @State private var importer = GalleryImporter.shared
 
@@ -370,6 +372,10 @@ struct ProfileView: View {
 
                 appearanceControl
                 libraryControl
+
+                if !items.isEmpty {
+                    eraseAllControl
+                }
             }
         }
     }
@@ -403,6 +409,34 @@ struct ProfileView: View {
         }
         .padding(16)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+
+    /// The one place to get everything back off the device. Kept at the very
+    /// bottom of Profile, behind a confirmation that names the count — an
+    /// unqualified "Delete all" is too easy to tap by accident.
+    private var eraseAllControl: some View {
+        Button(role: .destructive) {
+            isConfirmingEraseAll = true
+        } label: {
+            footerRow(
+                "Delete everything",
+                detail: "\(items.count) items",
+                systemImage: "trash"
+            )
+        }
+        .buttonStyle(.plain)
+        .confirmationDialog(
+            "Delete all \(items.count) items?",
+            isPresented: $isConfirmingEraseAll,
+            titleVisibility: .visible
+        ) {
+            Button("Delete everything", role: .destructive) {
+                modelContext.deleteShelfItems(items)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every screenshot, note and pass Cove has saved is removed from this device. Your photo library itself is untouched. This can't be undone.")
+        }
     }
 
     @ViewBuilder

@@ -13,6 +13,11 @@ struct MasonryWall: View {
     /// heap gathers at its center, sized to match it. Defaults to the
     /// wall's top center.
     var scatterFrame: CGRect? = nil
+    /// Multi-select state, owned by the hosting screen so its action bar can
+    /// sit outside the scroll view. `nil` means "not selecting"; a long press
+    /// or the context menu starts it. Defaults to a constant, so a caller that
+    /// doesn't opt in simply never enters selection mode.
+    var selection: Binding<Set<UUID>?> = .constant(nil)
 
     private static let columnCount = 3
     private static let spacing: CGFloat = 12
@@ -27,7 +32,10 @@ struct MasonryWall: View {
     /// scatter heap.
     @State private var wallFrame: CGRect = .zero
     @State private var settled = false
+    /// Items awaiting confirmation from the card context menu.
+    @State private var pendingDelete: [ShelfItem] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.modelContext) private var modelContext
     /// Zoom source for opening one card, mirroring how a pile opens into its
     /// wall — the card grows out of its slot instead of sliding in.
     @Namespace private var cardNamespace
@@ -51,19 +59,7 @@ struct MasonryWall: View {
                 ForEach(Array(distributedColumns(columnWidth: columnWidth).enumerated()), id: \.offset) { _, column in
                     LazyVStack(spacing: Self.spacing) {
                         ForEach(column) { placed in
-                            NavigationLink {
-                                ItemDetailView(item: placed.item)
-                                    .navigationTransition(
-                                        .zoom(sourceID: placed.id, in: cardNamespace)
-                                    )
-                            } label: {
-                                MasonryCard(
-                                    item: placed.item,
-                                    width: columnWidth,
-                                    aspect: Self.cardAspect(of: placed.item)
-                                )
-                            }
-                            .buttonStyle(.plain)
+                            cardCell(placed, columnWidth: columnWidth)
                             .modifier(
                                 ScatterEffect(
                                     isScattered: !scattersIn || settled || reduceMotion,
@@ -76,6 +72,14 @@ struct MasonryWall: View {
                             // Outside the scatter so the zoom source is the
                             // card's settled frame, not its heaped transform.
                             .matchedTransitionSource(id: placed.id, in: cardNamespace)
+                            .contextMenu {
+                                Button("Select", systemImage: "checkmark.circle") {
+                                    selection.wrappedValue = [placed.id]
+                                }
+                                Button("Delete", systemImage: "trash", role: .destructive) {
+                                    pendingDelete = [placed.item]
+                                }
+                            }
                             // Heap stacks like the pile: the newest card
                             // (the pile's front cover) draws on top and is
                             // also the first to fly into place.
@@ -99,6 +103,22 @@ struct MasonryWall: View {
             try? await Task.sleep(for: .milliseconds(50))
             settled = true
         }
+        .confirmationDialog(
+            "Delete this item?",
+            isPresented: .init(
+                get: { !pendingDelete.isEmpty },
+                set: { if !$0 { pendingDelete = [] } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                modelContext.deleteShelfItems(pendingDelete)
+                pendingDelete = []
+            }
+            Button("Cancel", role: .cancel) { pendingDelete = [] }
+        } message: {
+            Text("Removed from this device for good.")
+        }
     }
 
     /// Clamped card height/width used for both packing and layout.
@@ -111,6 +131,68 @@ struct MasonryWall: View {
             fallback: 1.2
         )
         return min(max(ratio, aspectRange.lowerBound), aspectRange.upperBound)
+    }
+
+    /// One card: a link when browsing, a selection toggle when selecting.
+    @ViewBuilder
+    private func cardCell(_ placed: PlacedItem, columnWidth: CGFloat) -> some View {
+        let selecting = selection.wrappedValue != nil
+        let isOn = selection.wrappedValue?.contains(placed.id) ?? false
+
+        if selecting {
+            Button {
+                toggle(placed.id)
+            } label: {
+                face(placed, columnWidth: columnWidth, isSelected: isOn)
+            }
+            .buttonStyle(.plain)
+        } else {
+            NavigationLink {
+                ItemDetailView(item: placed.item)
+                    .navigationTransition(
+                        .zoom(sourceID: placed.id, in: cardNamespace)
+                    )
+            } label: {
+                face(placed, columnWidth: columnWidth, isSelected: false)
+            }
+            .buttonStyle(.plain)
+            // Long press is the standard way into multi-select, and it's how
+            // people already expect to start one in Photos.
+            .onLongPressGesture {
+                selection.wrappedValue = [placed.id]
+            }
+        }
+    }
+
+    private func face(_ placed: PlacedItem, columnWidth: CGFloat, isSelected: Bool) -> some View {
+        MasonryCard(
+            item: placed.item,
+            width: columnWidth,
+            aspect: Self.cardAspect(of: placed.item)
+        )
+        // Dim the unpicked ones rather than only marking the picked ones —
+        // at a glance the selection should read as the bright subset.
+        .opacity(selection.wrappedValue == nil || isSelected ? 1 : 0.55)
+        .overlay(alignment: .topTrailing) {
+            if selection.wrappedValue != nil {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, isSelected ? Color.accentColor : .black.opacity(0.35))
+                    .shadow(color: .black.opacity(0.3), radius: 3)
+                    .padding(8)
+            }
+        }
+    }
+
+    private func toggle(_ id: UUID) {
+        var current = selection.wrappedValue ?? []
+        if current.contains(id) {
+            current.remove(id)
+        } else {
+            current.insert(id)
+        }
+        selection.wrappedValue = current
     }
 
     /// Heaped cards match the tapped pile's cover width (the pile pads its
