@@ -141,6 +141,18 @@ final class ShelfCategorizer {
         case .link:
             return .links
         case .screenshot, .image:
+            // What the extraction *read off the item* beats what the image
+            // merely looks like. A receipt that says "receipt" is settled; the
+            // prototype match below is a fuzzy zero-shot similarity and only
+            // gets a say when there's nothing better.
+            //
+            // This is also what rescues an item with no embedding at all —
+            // seeded demo passes, or anything whose embedding pass failed —
+            // which would otherwise land in "Everything else" forever.
+            if let bucket = Self.bucket(forExtraction: item.extraction) {
+                return bucket
+            }
+
             guard isReady,
                   let vector = item.embedding ?? item.textEmbedding else {
                 return .other
@@ -157,6 +169,28 @@ final class ShelfCategorizer {
                 }
             }
             return bestBucket
+        }
+    }
+
+    /// The shelf a structured extraction puts an item on, or `nil` when the
+    /// extraction says nothing a shelf maps to and the prototypes should decide.
+    static func bucket(forExtraction extraction: ItemExtraction?) -> ShelfBucket? {
+        // A receipt/event/ticket label only earns its shelf if the fields back
+        // it up; otherwise defer to the prototypes, which are better at telling
+        // a certificate from a boarding pass than a forced label is.
+        if let extraction,
+           ["receipt", "event", "ticket"].contains(extraction.category),
+           !extraction.describesAPass {
+            return nil
+        }
+
+        return switch extraction?.category {
+        case "receipt": .receipts
+        // Concerts, flights, trains and cinema all live on the same shelf.
+        case "event", "ticket": .events
+        case "article": .documents
+        case "note": .notes
+        default: nil
         }
     }
 

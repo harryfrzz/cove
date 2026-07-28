@@ -41,6 +41,44 @@ struct ItemExtraction: Codable, Sendable, Equatable {
     var price: String?
 }
 
+extension ItemExtraction {
+    /// Whether the extracted fields actually back up the category.
+    ///
+    /// The classifier picks from a fixed list, so anything that is *none* of
+    /// them still comes back wearing one of the labels — a certificate reads as
+    /// an "event" because it has a name and a date, a poster reads as a
+    /// "ticket". The label alone is therefore not evidence of anything. The
+    /// pass-specific fields are: a seat, a booking reference, a total.
+    ///
+    /// Deliberately strict. A borderline item that gets excluded can still be
+    /// added by hand from its detail page; a plain photo dressed as a boarding
+    /// pass has no such escape.
+    var describesAPass: Bool {
+        switch category {
+        // A receipt without an amount paid is not a receipt.
+        case "receipt":
+            Self.hasValue(total)
+        // What makes a ticket is where you sit and what you booked under —
+        // a certificate has a title and a date too, but never a seat.
+        case "ticket":
+            Self.hasValue(seatDetails)
+                || Self.hasValue(referenceNumber)
+                || Self.hasValue(price)
+        // A date alone is the weakest possible signal; a venue alongside it is
+        // what separates something you attend from something you were awarded.
+        case "event":
+            Self.hasValue(eventStart) && Self.hasValue(eventLocation)
+        default:
+            false
+        }
+    }
+
+    private static func hasValue(_ field: String?) -> Bool {
+        guard let field else { return false }
+        return !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
 protocol StructuredExtractionService: Sendable {
     /// Classifies the text, runs the matching extraction schema, and returns
     /// a summary plus typed fields. Throws when the system model is
@@ -52,7 +90,13 @@ protocol StructuredExtractionService: Sendable {
 
 @Generable(description: "Classification of a captured item")
 private struct ContentClassification {
-    @Guide(description: "The content type", .anyOf(["receipt", "event", "article", "note","ticket"]))
+    // "other" is the escape hatch. Without it the model had to force every
+    // photograph and certificate into one of the four real types, and whatever
+    // it picked was taken downstream as fact.
+    @Guide(
+        description: "The content type",
+        .anyOf(["receipt", "event", "article", "note", "ticket", "other"])
+    )
     var category: String
 }
 
@@ -261,10 +305,22 @@ struct FoundationModelsService: SummarizationService, StructuredExtractionServic
                 summary: note.summary,
                 tags: note.tags,
                 extraction: ItemExtraction(
-                    category: category == "article" ? "link" : "note",
+                    // "other" stays "other": collapsing it into "note" would
+                    // hand it back the benefit of the doubt this branch exists
+                    // to withhold.
+                    category: Self.storedCategory(for: category),
                     shortTitle: note.shortTitle
                 )
             )
+        }
+    }
+
+    /// Category persisted for anything the specific extractors didn't handle.
+    private static func storedCategory(for classified: String) -> String {
+        switch classified {
+        case "article": "link"
+        case "other": "other"
+        default: "note"
         }
     }
 
@@ -273,7 +329,7 @@ struct FoundationModelsService: SummarizationService, StructuredExtractionServic
         if kind == .link { return "article" }
 
         let session = LanguageModelSession(
-            instructions: "Classify the text of a saved item. A receipt shows purchased items or amounts paid. A ticket is a movie, train, bus, or event booking with a seat, fare, or booking reference. An event has a date and a happening to attend. An article is saved web content. Everything else is a note."
+            instructions: "Classify the text of a saved item. A receipt shows purchased items or amounts paid. A ticket is a movie, train, bus, or event booking with a seat, fare, or booking reference. An event has a date and a happening to attend. An article is saved web content. A note is something the person wrote. Use other for anything else — an ordinary photograph, a certificate or award, an ID card, a screenshot of an app. Do not stretch a document to fit a type it is not; other is the right answer more often than any single type."
         )
         let result = try await session.respond(
             to: content,

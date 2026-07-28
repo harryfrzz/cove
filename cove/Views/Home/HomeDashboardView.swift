@@ -9,7 +9,6 @@ struct HomeDashboardView: View {
     var onOpenWallet: () -> Void = {}
 
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
-    @State private var categorizer = ShelfCategorizer.shared
 
     /// Tapped pass, held alone over the blurred page.
     @State private var expandedCard: WalletCard?
@@ -65,11 +64,7 @@ struct HomeDashboardView: View {
 
     private var walletCards: [WalletCard] {
         readyItems
-            .filter { item in
-                if item.isInWallet { return true }
-                let bucket = categorizer.bucket(for: item)
-                return bucket == .receipts || bucket == .events
-            }
+            .filter(\.isWalletPass)
             .prefix(6)
             .map { WalletCard.card(for: $0) }
     }

@@ -4,7 +4,7 @@ import SwiftUI
 // MARK: - Card model
 
 /// Display model for one wallet pass, derived from a shelf item's structured
-/// extraction when available, else from its classification bucket.
+/// extraction — or, for an item the user pinned by hand, the neutral pass face.
 struct WalletCard: Identifiable {
     enum Style {
         case receipt
@@ -143,15 +143,14 @@ struct WalletCard: Identifiable {
             )
         }
 
-        let bucket = ShelfCategorizer.shared.bucket(for: item)
-        let style: Style = switch bucket {
-        case .receipts: .receipt
-        case .events: .ticket
-        default: .generic
-        }
+        // Everything past here is an item the user pinned by hand that carries
+        // no extraction. It gets the neutral "Pass" face — deriving the style
+        // from `ShelfCategorizer` instead would dress a plain photo up as a
+        // Ticket on the strength of a loose CLIP match, which is the same
+        // guesswork that put those photos in the wallet to begin with.
         return WalletCard(
             id: item.id,
-            style: style,
+            style: .generic,
             title: item.title,
             subtitle: item.summary,
             primaryLabel: "Saved",
@@ -176,11 +175,41 @@ struct WalletCard: Identifiable {
     }
 }
 
+// MARK: - Membership
+
+extension ShelfItem {
+    /// Extraction categories that describe an actual pass.
+    private static let passCategories: Set<String> = ["receipt", "event", "ticket"]
+
+    /// Whether this item belongs in the wallet.
+    ///
+    /// Membership has to be *earned* by a structured extraction, never inferred
+    /// from image similarity. `ShelfCategorizer.bucket(for:)` is a zero-shot
+    /// CLIP match against prompts like "a ticket for a concert or event", with
+    /// a deliberately low floor so the shelf's category grid stays populated —
+    /// which means an ordinary camera-roll photo can clear it and land in
+    /// `.events`. Reading that as wallet membership put plain photos in the
+    /// wallet dressed as tickets, with no seat, time, or total to show.
+    ///
+    /// So: a real extraction, or an explicit pin. Nothing else.
+    var isWalletPass: Bool {
+        guard processingState == .ready else { return false }
+        if isInWallet { return true }
+        // Both halves are required. The category says what the classifier
+        // *called* it; `describesAPass` says whether the extracted fields bear
+        // that out. A camera-roll photo forced into "event" clears the first
+        // and fails the second.
+        guard let extraction, Self.passCategories.contains(extraction.category) else {
+            return false
+        }
+        return extraction.describesAPass
+    }
+}
+
 // MARK: - Wallet page
 
 struct WalletView: View {
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
-    @State private var categorizer = ShelfCategorizer.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Which pass the carousel has settled on.
@@ -192,12 +221,7 @@ struct WalletView: View {
 
     private var cards: [WalletCard] {
         items
-            .filter { item in
-                guard item.processingState == .ready else { return false }
-                if item.isInWallet { return true }
-                let bucket = categorizer.bucket(for: item)
-                return bucket == .receipts || bucket == .events
-            }
+            .filter(\.isWalletPass)
             .map { WalletCard.card(for: $0) }
     }
 
@@ -369,21 +393,60 @@ private struct CoverFlowCarousel: View {
     /// still read as a card rather than a chip.
     private static let sideScale: CGFloat = 0.18
 
+    /// How many cards either side of centre get built. Spacing compresses past
+    /// the first neighbour, so nothing beyond about ±2.5 is still on screen —
+    /// 4 leaves a margin for a fast flick without building the whole wallet.
+    ///
+    /// This matters more than it looks: every card carries a `rotation3DEffect`,
+    /// a blur, a shadow pair and a `ShelfThumbnail` that decodes a bitmap, so
+    /// an unwindowed `ForEach` did all of that once per pass on every frame of
+    /// a drag.
+    private static let windowRadius = 4
+
+    /// Finger travel that turns one card all the way over.
+    ///
+    /// Deliberately *not* the visual spacing. Driving the transform straight
+    /// off `step` meant ~144pt of movement spun a card through its full 42°,
+    /// which read as twitchy — a thumb twitch visibly threw the deck. Cards
+    /// still sit the same distance apart; they just take more finger to move.
+    private static let dragPerCard: CGFloat = 230
+
+    /// How much of the system's velocity projection is allowed to count toward
+    /// where the deck lands. The raw prediction models a scroll throw and
+    /// overshoots badly here: a brisk 60pt swipe can project past 400pt, which
+    /// was enough to skip a card.
+    private static let flickWeight: CGFloat = 0.22
+
+    /// Momentum beyond which a swipe reads as a deliberate flick and is allowed
+    /// to skip a second card. Below it, one swipe moves exactly one card no
+    /// matter how far the projection runs.
+    private static let flickThreshold: CGFloat = 620
+
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
             let cardWidth = min(width * 0.80, 340)
             let step = cardWidth * 0.46
-            let progress = CGFloat(index) - drag / step
+            let progress = CGFloat(index) - drag / Self.dragPerCard
 
             ZStack {
-                ForEach(Array(cards.enumerated()), id: \.element.id) { position, card in
-                    cover(card, distance: CGFloat(position) - progress, cardWidth: cardWidth, step: step)
+                ForEach(window(around: progress), id: \.card.id) { entry in
+                    cover(
+                        entry.card,
+                        distance: CGFloat(entry.position) - progress,
+                        isFocused: entry.position == index,
+                        cardWidth: cardWidth,
+                        step: step
+                    )
                 }
             }
             .frame(width: width, height: Self.cardHeight)
             .contentShape(.rect)
-            .gesture(swipe(step: step))
+            // High priority so a moving touch is resolved as a drag before
+            // any card's NavigationLink can claim it as a tap. A stationary
+            // touch fails the 8pt minimum and falls through to the link, so
+            // tap-to-open still works.
+            .highPriorityGesture(swipe)
         }
         .frame(height: Self.cardHeight)
         .padding(.vertical, 18)
@@ -394,9 +457,33 @@ private struct CoverFlowCarousel: View {
         }
     }
 
+    /// One card close enough to centre to be worth building.
+    private struct Windowed {
+        let position: Int
+        let card: WalletCard
+    }
+
+    /// The slice of the deck to draw for a given scroll position.
+    ///
+    /// Clamped rather than wrapped, and tolerant of a `progress` dragged past
+    /// either end: an overscroll can put the centre outside the array, in which
+    /// case the range collapses and nothing is drawn rather than trapping on a
+    /// bad subscript.
+    private func window(around progress: CGFloat) -> [Windowed] {
+        guard !cards.isEmpty else { return [] }
+
+        let centre = Int(progress.rounded())
+        let lower = max(0, centre - Self.windowRadius)
+        let upper = min(cards.count - 1, centre + Self.windowRadius)
+        guard lower <= upper else { return [] }
+
+        return (lower...upper).map { Windowed(position: $0, card: cards[$0]) }
+    }
+
     private func cover(
         _ card: WalletCard,
         distance: CGFloat,
+        isFocused: Bool,
         cardWidth: CGFloat,
         step: CGFloat
     ) -> some View {
@@ -424,17 +511,42 @@ private struct CoverFlowCarousel: View {
         .blur(radius: min(magnitude, 1.5) * 1.6)
         .opacity(max(0.4, 1 - magnitude * 0.22))
         .zIndex(10 - Double(magnitude))
-        .allowsHitTesting(magnitude < 0.5)
+        // Keyed to the *settled* index, not the live distance. Deriving it
+        // from `magnitude` meant cards became tappable part-way through a drag
+        // — and which one crossed the threshold under the finger depended on
+        // which way you swiped, so a backward swipe could hand the touch to a
+        // card that had just switched on and open it on release.
+        //
+        // `index` cannot change until the gesture ends, so the set of tappable
+        // views is now fixed for the whole drag.
+        .allowsHitTesting(isFocused)
     }
 
-    private func swipe(step: CGFloat) -> some Gesture {
+    private var swipe: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
                 drag = value.translation.width
             }
             .onEnded { value in
-                let projected = value.predictedEndTranslation.width
-                let steps = Int(max(-2, min(2, (-projected / step).rounded())))
+                let travel = value.translation.width
+                // Split the system's projection into what the finger actually
+                // covered and what it merely predicts from velocity. The two
+                // deserve very different weight — the first is intent, the
+                // second is a guess tuned for scroll views.
+                let momentum = value.predictedEndTranslation.width - travel
+                let effective = travel + momentum * Self.flickWeight
+
+                // However far the finger actually went is honoured in full —
+                // clamping that would rubber-band a deliberate long drag back
+                // to one card after the deck had visibly moved two. Momentum
+                // may add one card on top of it, and only on a real flick.
+                let travelled = max(1, (abs(travel) / Self.dragPerCard).rounded())
+                let limit = travelled + (abs(momentum) > Self.flickThreshold ? 1 : 0)
+
+                let steps = Int(
+                    max(-limit, min(limit, (-effective / Self.dragPerCard).rounded()))
+                )
+
                 let target = min(max(index + steps, 0), max(cards.count - 1, 0))
                 withAnimation(
                     reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.78)
