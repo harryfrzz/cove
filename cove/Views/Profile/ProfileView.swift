@@ -18,6 +18,7 @@ import SwiftUI
 struct ProfileView: View {
     var onOpenShelf: () -> Void = {}
     var onOpenWallet: () -> Void = {}
+    var onOpenUpcoming: () -> Void = {}
 
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
     @Environment(\.modelContext) private var modelContext
@@ -169,8 +170,14 @@ struct ProfileView: View {
     /// gradient rather than boxed in a card.
     private var hero: some View {
         VStack(spacing: 0) {
-            LiquidCount(value: indexedImageCount, level: indexedFraction)
-                .padding(.top, 18)
+            LiquidNumber(
+                text: indexedImageCount.formatted(
+                    .number.notation(.compactName).precision(.fractionLength(0...1))
+                ),
+                level: indexedFraction,
+                accessibilityLabel: "\(indexedImageCount) pictures indexed"
+            )
+            .padding(.top, 18)
 
             Text("Files indexed")
                 .font(.system(size: 13, weight: .semibold))
@@ -329,10 +336,17 @@ struct ProfileView: View {
             HStack(spacing: 10) {
                 Button {
                     close()
-                    bucket == .receipts || bucket == .events ? onOpenWallet() : onOpenShelf()
+                    switch bucket {
+                    case .receipts:
+                        onOpenWallet()
+                    case .events:
+                        onOpenUpcoming()
+                    default:
+                        onOpenShelf()
+                    }
                 } label: {
                     Label(
-                        bucket == .receipts || bucket == .events ? "Open wallet" : "Open shelf",
+                        destinationTitle(for: bucket),
                         systemImage: "arrow.up.right"
                     )
                     .font(.subheadline.weight(.semibold))
@@ -346,6 +360,14 @@ struct ProfileView: View {
         .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 28))
+    }
+
+    private func destinationTitle(for bucket: ShelfBucket) -> String {
+        switch bucket {
+        case .receipts: "Open wallet"
+        case .events: "Open upcoming"
+        default: "Open home"
+        }
     }
 
     // MARK: - Footer
@@ -371,6 +393,7 @@ struct ProfileView: View {
                 .glassEffect(.regular, in: .rect(cornerRadius: 24))
 
                 appearanceControl
+                modelsControl
                 libraryControl
 
                 if !items.isEmpty {
@@ -378,6 +401,26 @@ struct ProfileView: View {
                 }
             }
         }
+    }
+
+    /// The one row on this page that leads somewhere rather than doing
+    /// something. Status is summarised from the language model alone: the
+    /// encoders ship in the binary and are never the thing that needs setting
+    /// up, so a row that said "needs setup" for them would be pointing at a
+    /// problem the user cannot act on.
+    private var modelsControl: some View {
+        NavigationLink {
+            ModelSetupView()
+        } label: {
+            footerRow(
+                "On-device models",
+                detail: FoundationModelsService.availabilityError() == nil
+                    ? "Ready"
+                    : "Needs setup",
+                systemImage: "cpu"
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// Light, dark, or whatever the phone is doing. Sits with the other two
@@ -504,95 +547,6 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Liquid count
-
-/// The headline figure, set large and unboxed: the digits themselves are glass
-/// vessels holding purple liquid, and the waterline sits where indexing has
-/// got to, rising as the pipeline works through the library.
-///
-/// The `coveGlassNumber` shader is a layer effect, so it samples these glyphs
-/// to find their own edges — see the shader for why that is what makes the
-/// glass read as thick rather than as a flat fill.
-private struct LiquidCount: View {
-    let value: Int
-    /// 0 empty, 1 full.
-    let level: Double
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    /// Faster than the page gradients — a small body of fluid in a held object
-    /// should move at a hand's pace, not a horizon's.
-    private static let period: Double = 7
-    private static let height: CGFloat = 208
-
-    var body: some View {
-        Group {
-            if reduceMotion {
-                glyphs(loop: 0)
-            } else {
-                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
-                    let loop = context.date.timeIntervalSinceReferenceDate
-                        .truncatingRemainder(dividingBy: Self.period) / Self.period
-                    glyphs(loop: Float(loop))
-                }
-            }
-        }
-        .frame(height: Self.height)
-        // Keeps the widest figure clear of the screen edges.
-        .padding(.horizontal, 16)
-        // Real glass sits on something. Without a shadow the digits float,
-        // which reads as a sticker rather than as an object.
-        .shadow(color: .black.opacity(0.16), radius: 14, y: 8)
-        .accessibilityElement()
-        .accessibilityLabel("\(value) pictures indexed")
-    }
-
-    private func glyphs(loop: Float) -> some View {
-        GeometryReader { geometry in
-            Text(formatted)
-                .font(.system(size: fontSize, weight: .heavy, design: .rounded))
-                .minimumScaleFactor(0.4)
-                .lineLimit(1)
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                .layerEffect(
-                    ShaderLibrary.coveGlassNumber(
-                        .float2(geometry.size),
-                        .float(loop),
-                        .float(Float(min(max(level, 0), 1)))
-                    ),
-                    // Must clear the widest ring the shader reads. The wall
-                    // scales with glyph height and is capped at 16pt there, so
-                    // this has to stay above that cap.
-                    maxSampleOffset: CGSize(width: 22, height: 22)
-                )
-        }
-    }
-
-    /// Compact notation, so a large library reads "12.4K" rather than running
-    /// off the side of the screen.
-    private var formatted: String {
-        value.formatted(
-            .number
-                .notation(.compactName)
-                .precision(.fractionLength(0...1))
-        )
-    }
-
-    /// Point size chosen from how wide the figure actually is. `minimumScale
-    /// Factor` alone would handle the overflow, but it shrinks the glyphs
-    /// *within a fixed box* — the number would end up floating in dead space
-    /// with the shader's wall thickness scaled for a size it is no longer
-    /// drawn at. Choosing the size up front keeps the glass proportional.
-    private var fontSize: CGFloat {
-        switch formatted.count {
-        case ...2: 186
-        case 3: 156
-        case 4: 130
-        case 5: 112
-        default: 96
-        }
-    }
-}
 
 #Preview("Profile") {
     ProfileView()

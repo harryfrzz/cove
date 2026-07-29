@@ -1,31 +1,26 @@
 import SwiftData
 import SwiftUI
 
-/// Landing dashboard: what Cove has captured that still matters at a glance —
-/// the wallet passes and what's coming up. Browsing the full shelf is the
-/// shelf tab's job, so the page stays a summary rather than a second feed.
+/// Wallet destination built from the former Home ticket stack. The screenshots
+/// library now owns Home, so this page is deliberately only about passes.
 struct HomeDashboardView: View {
-    /// Wired by the shell so the wallet header can jump to its tab.
-    var onOpenWallet: () -> Void = {}
-
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
+    /// Only for the empty state: a first launch spends its time indexing, and
+    /// "nothing here yet" is the wrong thing to say while that is running.
+    @State private var importer = GalleryImporter.shared
 
     /// Tapped pass, held alone over the blurred page.
     @State private var expandedCard: WalletCard?
-    /// Zoom sources: passes grow out of the fan, event cards out of the
-    /// carousel — the same opening the album piles use.
+    /// Passes grow out of the fan into their full-screen detail.
     @Namespace private var passNamespace
-    @Namespace private var eventNamespace
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                if !walletCards.isEmpty {
+            LazyVStack(alignment: .leading, spacing: 28) {
+                if walletCards.isEmpty {
+                    emptyState
+                } else {
                     walletSection
-                }
-
-                if !eventRows.isEmpty {
-                    eventsSection
                 }
             }
             .padding(.horizontal, 20)
@@ -69,46 +64,53 @@ struct HomeDashboardView: View {
             .map { WalletCard.card(for: $0) }
     }
 
-    /// Event/ticket rows, soonest upcoming first when a date parses, else the
-    /// latest captures. Extraction dates are freeform strings, so parsing is
-    /// best-effort via the system date detector.
-    private var eventRows: [EventRow] {
-        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.date.rawValue)
+    // MARK: - Empty state
 
-        let rows: [EventRow] = readyItems.compactMap { item in
-            guard let extraction = item.extraction else { return nil }
+    /// Defers to the indexer while it is running, then explains how a pass
+    /// reaches the wallet rather than presenting an overview placeholder.
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: importer.isImporting ? "arrow.trianglehead.2.clockwise" : "sparkles")
+                .font(.system(size: 34, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(CoveTheme.ink.opacity(0.65))
+                .symbolEffect(.pulse, isActive: importer.isImporting)
 
-            let (title, when, place): (String?, String?, String?) =
-                switch extraction.category {
-                case "event":
-                    (extraction.eventTitle, extraction.eventStart, extraction.eventLocation)
-                case "ticket":
-                    (extraction.ticketTitle, extraction.ticketDateTime, extraction.venueOrOperator)
-                default:
-                    (nil, nil, nil)
-                }
-            guard let title else { return nil }
+            Text(importer.isImporting ? "Reading your library" : "Your wallet is empty")
+                .font(.system(.title2, design: .serif, weight: .semibold))
+                .foregroundStyle(CoveTheme.ink)
 
-            var parsed: Date?
-            if let when, let detector {
-                let range = NSRange(when.startIndex..., in: when)
-                parsed = detector.firstMatch(in: when, range: range)?.date
+            Text(emptyMessage)
+                .font(.subheadline)
+                .foregroundStyle(CoveTheme.inkSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if importer.isImporting, importer.totalCount > 0 {
+                ProgressView(
+                    value: Double(importer.importedCount),
+                    total: Double(importer.totalCount)
+                )
+                .tint(CoveTheme.ink)
+                .frame(maxWidth: 220)
+                .padding(.top, 2)
             }
-            return EventRow(
-                id: item.id,
-                title: title,
-                when: when,
-                place: place,
-                date: parsed,
-                item: item
-            )
         }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
+        .padding(.horizontal, 26)
+        .glassEffect(.regular, in: .rect(cornerRadius: 30))
+        .padding(.top, 40)
+    }
 
-        let upcoming = rows
-            .filter { ($0.date ?? .distantPast) >= .now }
-            .sorted { ($0.date ?? .distantFuture) < ($1.date ?? .distantFuture) }
-        if !upcoming.isEmpty { return Array(upcoming.prefix(4)) }
-        return Array(rows.prefix(4))
+    private var emptyMessage: String {
+        if importer.isDenied {
+            return "Cove has no access to your photos, so it cannot find passes yet. Capture one with the + button, or turn access on from Profile."
+        }
+        if importer.isImporting {
+            return "Tickets, receipts, and passes will appear here as Cove finishes reading each screenshot."
+        }
+        return "Tickets and receipts appear here once Cove has read them. You can also add an item to Wallet from its detail page."
     }
 
     // MARK: - Chrome
@@ -117,263 +119,38 @@ struct HomeDashboardView: View {
     /// page's header has to say which tab you are standing on. The orange item
     /// count keeps its trailing slot.
     private var topBar: some View {
-        CoveScreenHeader("Home") {
-            Text("\(items.count)")
+        CoveScreenHeader("Wallet") {
+            Text("\(walletCards.count)")
                 .font(.system(.subheadline, design: .serif, weight: .bold))
                 .foregroundStyle(.orange)
                 .frame(minWidth: 36, minHeight: 36)
                 .glassEffect(.regular, in: Circle())
-                .accessibilityLabel("\(items.count) items")
+                .accessibilityLabel("\(walletCards.count) passes")
         }
     }
 
-    // MARK: - Wallet preview
+    // MARK: - Wallet
 
     private var walletSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader("Wallet", actionTitle: "Open wallet", action: onOpenWallet)
-
-            WalletFanStack(
-                cards: walletCards,
-                namespace: passNamespace,
-                onSelect: { expandedCard = $0 }
-            )
-        }
-    }
-
-    // MARK: - Events
-
-    /// Upcoming reads as a deck of cards rather than a list: each event gets
-    /// its own coloured face, and the next one peeks in from the trailing edge
-    /// so the row is visibly scrollable without an indicator.
-    private var eventsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            sectionHeader(hasUpcoming ? "Upcoming" : "Events & tickets")
-
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 14) {
-                    ForEach(eventRows) { row in
-                        NavigationLink {
-                            ItemDetailView(item: row.item)
-                                .navigationTransition(
-                                    .zoom(sourceID: row.id, in: eventNamespace)
-                                )
-                        } label: {
-                            EventCard(row: row)
-                        }
-                        .buttonStyle(.plain)
-                        .matchedTransitionSource(id: row.id, in: eventNamespace)
-                        // Poster proportions, roughly 1:1.45 against the fixed
-                        // height. Narrower than this and the title runs out of
-                        // room — event names arrive with venues and route
-                        // codes attached, and they were being scaled down to
-                        // fit rather than simply fitting.
-                        .containerRelativeFrame(.horizontal) { length, _ in
-                            length * 0.50
-                        }
-                    }
-                }
-                .scrollTargetLayout()
-                .padding(.vertical, 6)
-                .padding(.horizontal, 2)
-            }
-            .scrollTargetBehavior(.viewAligned)
-            .scrollIndicators(.hidden)
-            .scrollClipDisabled()
-        }
-    }
-
-    private var hasUpcoming: Bool {
-        eventRows.contains { ($0.date ?? .distantPast) >= .now }
-    }
-
-    // MARK: - Shared chrome
-
-    private func sectionHeader(
-        _ title: String,
-        actionTitle: String? = nil,
-        action: @escaping () -> Void = {}
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title)
-                .font(.system(.title3, design: .serif, weight: .semibold))
-                .foregroundStyle(CoveTheme.ink)
-            Spacer()
-            if let actionTitle {
-                Button(action: action) {
-                    HStack(spacing: 3) {
-                        Text(actionTitle)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2.weight(.bold))
-                    }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(CoveTheme.inkSecondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
-// MARK: - Paper card style
-
-// MARK: - Event row
-
-private struct EventRow: Identifiable {
-    let id: UUID
-    let title: String
-    let when: String?
-    let place: String?
-    let date: Date?
-    let item: ShelfItem
-}
-
-/// One upcoming event as a coloured card: name and countdown at the top, the
-/// date as the centrepiece, venue along the bottom.
-private struct EventCard: View {
-    let row: EventRow
-
-    private static let height: CGFloat = 264
-    private static let cornerRadius: CGFloat = 24
-
-    /// Built once per card. Rebuilding it inside `body` would re-run the
-    /// seeded draws on every animation frame.
-    private let palette: CoveGradientPalette
-
-    init(row: EventRow) {
-        self.row = row
-        palette = CoveGradientPalette(seed: row.id)
-    }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            CoveGradientBackdrop(palette: palette)
-
-            numeral
-            content
-        }
-        .frame(height: Self.height)
-        .clipShape(.rect(cornerRadius: Self.cornerRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: Self.cornerRadius)
-                .strokeBorder(.white.opacity(0.45), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.14), radius: 10, y: 5)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(row.title), \(countdown). \(footnote)")
-    }
-
-    /// The day, set oversized in the bottom-left and deliberately running off
-    /// both edges so the card crops it. Sitting between the gradient and the
-    /// text, it reads as part of the artwork rather than as a label.
-    private var numeral: some View {
-        Group {
-            if let date = row.date {
-                Text(date.formatted(.dateTime.day()))
-                    .font(.system(size: 132, weight: .heavy, design: .serif))
-            } else {
-                Image(systemName: "ticket.fill")
-                    .font(.system(size: 92, weight: .semibold))
-            }
-        }
-        // Ink, not white. The shader lifts every gradient toward white to keep
-        // the body text readable, which left a white numeral with nothing to
-        // sit against — on the paler rolls it broke up into disconnected
-        // shapes. A dark tint is legible against all of them.
-        .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.15))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-        // Overhangs enough to crop, not so much that the digits lose the
-        // curves that identify them.
-        .offset(x: -10, y: 26)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    /// Everything readable, hard-aligned to the leading edge: countdown,
-    /// title, then the month and place pinned to the bottom-right where the
-    /// numeral leaves room.
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(countdown.uppercased())
-                .font(.system(size: 10, weight: .bold))
-                .tracking(1.4)
-                .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.5))
-                .lineLimit(1)
-
-            Text(displayTitle)
-                .font(.system(size: 19, weight: .bold, design: .serif))
-                .foregroundStyle(CoveTheme.inkOnArtwork)
-                .lineLimit(3)
-                .multilineTextAlignment(.leading)
-                .minimumScaleFactor(0.82)
-                .allowsTightening(true)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 5)
-
-            Spacer(minLength: 10)
-
-            VStack(alignment: .trailing, spacing: 1) {
-                if let date = row.date {
-                    Text(date.formatted(.dateTime.month(.abbreviated)).uppercased())
-                        .font(.system(size: 13, weight: .black))
-                        .tracking(1.8)
-                        .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.72))
-                }
-                Text(footnote)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(CoveTheme.inkOnArtwork.opacity(0.55))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.trailing)
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-        }
-        .padding(16)
-    }
-
-    /// Extracted titles carry their own separators — "Flight 6E 331 · BLR →
-    /// DEL". Left to wrap on its own the line broke after "331" and started
-    /// the next one with the dangling "·". The separator is already a natural
-    /// division in the title, so it becomes the line break instead of a
-    /// character that can be orphaned onto one.
-    private var displayTitle: String {
-        row.title
-            .replacingOccurrences(of: " · ", with: "\n")
-            .replacingOccurrences(of: " — ", with: "\n")
-    }
-
-    /// "Today" / "in 12 days", falling back to the printed string when the
-    /// date never parsed.
-    private var countdown: String {
-        guard let date = row.date else {
-            return row.when ?? "Saved"
-        }
-        if Calendar.current.isDateInToday(date) { return "Today" }
-        if Calendar.current.isDateInTomorrow(date) { return "Tomorrow" }
-        return date.formatted(.relative(presentation: .named))
-    }
-
-    private var footnote: String {
-        let parts = [row.place, row.when]
-            .compactMap(\.self)
-            .filter { !$0.isEmpty }
-        return parts.first ?? "Upcoming"
+        WalletFanStack(
+            cards: walletCards,
+            namespace: passNamespace,
+            onSelect: { expandedCard = $0 }
+        )
     }
 }
 
 // MARK: - Wallet fan stack
 
-/// Most recent passes fanned like a hand of cards: the newest sits in front
-/// at the bottom, older ones peek out above it, each tilted a touch the
-/// other way.
+/// Most recent passes stacked like a run of portrait admission tickets: the
+/// newest sits in front at the bottom while the mastheads of older tickets
+/// remain visible above it.
 private struct WalletFanStack: View {
     let cards: [WalletCard]
     let namespace: Namespace.ID
     let onSelect: (WalletCard) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Bumped once the passes are on screen; every card's keyframe timeline
-    /// hangs off this, so one change fires the whole wave.
-    @State private var waveToken = 0
     /// How far the deck has been swiped through, in cards.
     @State private var cycle = 0
     /// Horizontal travel of the card being thrown, and which card that is —
@@ -381,25 +158,29 @@ private struct WalletFanStack: View {
     /// once the deck reorders underneath it.
     @State private var swipeX: CGFloat = 0
     @State private var swipingID: UUID?
+    /// Locks the deck while its three-stage throw/reorder/return is underway.
+    @State private var isCycling = false
 
-    /// Matches `WalletCardView`'s default height — the fan sizes its own
-    /// container from this, so the two have to move together.
-    private static let cardHeight: CGFloat = 158
+    /// Matches `HomeTicketCard` — the fan sizes its own container from this,
+    /// so the two have to move together.
+    private static let cardHeight: CGFloat = 510
     /// A real pile: the newest ticket sits in front at full height and the
     /// rest stack behind it, each showing just its emblem and category strip.
     /// Deliberately stops short of the title line — a half-clipped title reads
     /// as broken, an emblem strip reads as a stack.
-    private static let peek: CGFloat = 62
-    private static let maxCards = 4
+    private static let peek: CGFloat = 42
+    private static let maxCards = 3
     /// Headroom above and below the fan so a lifted card never clips.
     private static let liftRoom: CGFloat = 22
-    /// Beat before the wave starts, so the page has settled first.
-    private static let introDelay: Duration = .seconds(0.18)
     /// Sideways travel that commits to sending the front pass to the back.
     private static let swipeThreshold: CGFloat = 56
     /// How far the thrown card carries before the deck reorders behind it.
     private static let throwDistance: CGFloat = 380
-    private static let throwDuration: TimeInterval = 0.18
+    private static let throwDuration: TimeInterval = 0.2
+    /// The newly exposed front cards settle before the old front ticket
+    /// returns from off-screen into the rear slot.
+    private static let reorderDuration: TimeInterval = 0.22
+    private static let returnDuration: TimeInterval = 0.48
 
     /// The latest few passes — the whole deck the home fan ever deals with.
     private var deck: [WalletCard] { Array(cards.prefix(Self.maxCards)) }
@@ -423,45 +204,52 @@ private struct WalletFanStack: View {
                 // handles its touches internally — so the swipe below never
                 // got to start. A tap gesture at this level competes fairly
                 // with the drag: the tap loses the moment the finger travels.
-                WalletCardView(card: card)
-                    .contentShape(.rect(cornerRadius: 22))
-                .scaleEffect(1 - CGFloat(index) * 0.015)
-                .rotationEffect(Self.tilt(order: index), anchor: .center)
-                // Zoom reads the frame recorded here, so it has to sit inside
-                // the padding below — that padding is what actually places the
-                // card in the fan.
-                .matchedTransitionSource(id: card.id, in: namespace)
-                // Fan spacing as real layout, not `.offset`. An offset moves
-                // pixels but leaves the layout frame at the bottom of the
-                // stack, which is exactly the frame the zoom transition would
-                // return the pass to — the passes above the front one would
-                // drop to the wrong place on close.
-                .padding(.bottom, CGFloat(index) * Self.peek)
-                .offset(x: card.id == swipingID ? swipeX : 0)
-                .rotationEffect(
-                    .degrees(card.id == swipingID ? Double(swipeX) * 0.018 : 0),
-                    anchor: .bottom
-                )
-                // Intro wave, applied after the fan layout so the resting
-                // arrangement is untouched.
-                .modifier(
-                    FanLiftWave(
-                        order: index,
-                        restingTilt: Self.tilt(order: index),
-                        trigger: waveToken
+                Group {
+                    // Keep the next ticket fully rendered underneath the
+                    // current one. It is already rasterised when promoted, so
+                    // its details never pop in after the move. Only the third
+                    // ticket uses the inexpensive masthead-only placeholder.
+                    if index < 2 {
+                        HomeTicketCard(card: card, height: Self.cardHeight)
+                    } else {
+                        HomeTicketBackCard(card: card, height: Self.cardHeight)
+                    }
+                }
+                    .contentShape(.rect(cornerRadius: 24))
+                    .scaleEffect(1 - CGFloat(index) * 0.015)
+                    .rotationEffect(Self.tilt(order: index), anchor: .center)
+                    // Zoom reads the frame recorded here, so it has to sit inside
+                    // the padding below — that padding is what actually places the
+                    // card in the fan.
+                    .matchedTransitionSource(id: card.id, in: namespace)
+                    // Fan spacing as real layout, not `.offset`. An offset moves
+                    // pixels but leaves the layout frame at the bottom of the
+                    // stack, which is exactly the frame the zoom transition would
+                    // return the pass to — the passes above the front one would
+                    // drop to the wrong place on close.
+                    .padding(.bottom, CGFloat(index) * Self.peek)
+                    .offset(
+                        x: Self.fanOffset(order: index)
+                            + (card.id == swipingID ? swipeX : 0)
                     )
-                )
-                // Swipe only belongs to the pass on top; the rest keep their
-                // tap. `.subviews` disables this gesture without disabling
-                // the tap attached below it.
-                .gesture(cycleDrag(card: card), including: index == 0 ? .all : .subviews)
-                .onTapGesture { onSelect(card) }
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAction(named: "Open pass") { onSelect(card) }
-                .accessibilityAction(named: "Send to back") { cycleFan(direction: -1, card: card) }
-                .zIndex(-Double(index))
+                    .rotationEffect(
+                        .degrees(card.id == swipingID ? Double(swipeX) * 0.018 : 0),
+                        anchor: .bottom
+                    )
+                    // Swipe only belongs to the pass on top; the rest keep their
+                    // tap. `.subviews` disables this gesture without disabling
+                    // the tap attached below it.
+                    .gesture(cycleDrag(card: card), including: index == 0 ? .all : .subviews)
+                    .onTapGesture { onSelect(card) }
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction(named: "Open pass") { onSelect(card) }
+                    .accessibilityAction(named: "Send to back") {
+                        cycleFan(direction: -1, card: card)
+                    }
+                    .zIndex(-Double(index))
             }
         }
+        .allowsHitTesting(!isCycling)
         .frame(maxWidth: .infinity)
         .frame(
             height: Self.cardHeight + CGFloat(max(shown.count - 1, 0)) * Self.peek + 14,
@@ -470,18 +258,6 @@ private struct WalletFanStack: View {
         .padding(.horizontal, 6)
         .padding(.top, 4 + Self.liftRoom)
         .padding(.bottom, 8 + Self.liftRoom)
-        // Keyed on the card count so the wave also runs once the passes
-        // finish loading, not just on the first empty render. The task is
-        // torn down with the view, so coming back to Home starts a fresh one.
-        .task(id: shown.count) { await startWave() }
-    }
-
-    /// Fires the wave once, a beat after the fan is on screen. Reduce Motion
-    /// leaves the token alone, so no card timeline ever starts.
-    private func startWave() async {
-        guard !reduceMotion, !shown.isEmpty else { return }
-        guard (try? await Task.sleep(for: Self.introDelay)) != nil else { return }
-        waveToken += 1
     }
 
     // MARK: - Swipe to cycle
@@ -508,117 +284,477 @@ private struct WalletFanStack: View {
             }
     }
 
-    /// Front pass goes to the back, everything behind it steps forward. Two
-    /// beats: the card carries on out the way it was thrown while it is still
-    /// in front, then the deck reorders and it slides back in from the side —
-    /// by then it is the back card, so it tucks in under the others.
+    /// Front pass goes to the back, everything behind it steps forward. Three
+    /// beats: throw the card clear, promote the waiting cards, then return the
+    /// thrown card from the side after it owns the rear z-position.
     private func cycleFan(direction: CGFloat, card: WalletCard) {
         guard deck.count > 1 else {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { swipeX = 0 }
+            return
+        }
+        guard !isCycling else { return }
+
+        isCycling = true
+        swipingID = card.id
+
+        if reduceMotion {
+            cycle += 1
+            swipeX = 0
+            swipingID = nil
+            isCycling = false
             return
         }
 
         withAnimation(.easeIn(duration: Self.throwDuration)) {
             swipeX = direction * Self.throwDistance
         }
-        Task {
+
+        Task { @MainActor in
+            // First let the front ticket clear the deck completely.
             try? await Task.sleep(for: .seconds(Self.throwDuration))
-            withAnimation(.spring(response: 0.46, dampingFraction: 0.84)) {
+
+            // Keep that ticket parked off-screen while the remaining cards
+            // step forward. Its id now belongs to the rear, so its return will
+            // be painted underneath the promoted cards.
+            withAnimation(.snappy(duration: Self.reorderDuration, extraBounce: 0.04)) {
                 cycle += 1
+            }
+            try? await Task.sleep(for: .seconds(Self.reorderDuration * 0.72))
+
+            // Only now bring the old front ticket back, into its new rear slot.
+            withAnimation(.spring(response: Self.returnDuration, dampingFraction: 0.8)) {
                 swipeX = 0
             }
-            try? await Task.sleep(for: .seconds(0.5))
+
+            try? await Task.sleep(for: .seconds(Self.returnDuration))
             if swipingID == card.id { swipingID = nil }
+            isCycling = false
         }
     }
 
-    /// Alternating fan tilts, front card nearly straight — same spirit as
-    /// the shelf pile (see MasonryWall.heapTilt).
+    /// The front ticket stays readable while the two mastheads behind it lean
+    /// in opposite directions like a loose hand-stacked pile.
     private static func tilt(order: Int) -> Angle {
-        // Just off-square. Any more and the tilt swings each strip's lower
-        // edge far enough to slice the stub thumbnail at a different height on
-        // every card, which reads as sloppy rather than hand-stacked.
         switch order {
-        case 0: .degrees(-0.5)
-        case 1: .degrees(0.8)
-        case 2: .degrees(-0.9)
-        case 3: .degrees(0.7)
-        default: .degrees(-0.6)
+        case 0: .degrees(-0.35)
+        case 1: .degrees(3.2)
+        case 2: .degrees(-3.4)
+        default: .zero
+        }
+    }
+
+    /// A little horizontal separation makes both rear angles legible instead
+    /// of leaving their corners perfectly superimposed.
+    private static func fanOffset(order: Int) -> CGFloat {
+        switch order {
+        case 1: 5
+        case 2: -5
+        default: 0
         }
     }
 }
 
-// MARK: - Fan intro wave
+// MARK: - Home portrait ticket
 
-/// The four things a card does on its way through the wave. Tracked as one
-/// value so the keyframe timelines stay in step with each other.
-private struct FanLift {
-    var rise: CGFloat = 0
-    var scale: CGFloat = 1
-    /// 0 resting in the fan, 1 fully square to the page.
-    var straighten: Double = 0
-    /// 0 flat on the stack, 1 fully off it.
-    var shadow: Double = 0
+/// A Home-only pass face inspired by printed event stock: portrait proportions,
+/// a field of registration marks, oversized type, a perforated stub, and a
+/// machine-readable footer. The Wallet keeps its compact horizontal cards;
+/// this one is allowed to behave like the page's editorial centrepiece.
+private struct HomeTicketCard: View {
+    let card: WalletCard
+    let height: CGFloat
+
+    private static let width: CGFloat = 318
+    private static let stubHeight: CGFloat = 102
+    private static let outline = HomeTicketShape(
+        cornerRadius: 22,
+        notchRadius: 12,
+        stubHeight: stubHeight
+    )
+
+    var body: some View {
+        VStack(spacing: 0) {
+            mainBody
+                .frame(maxHeight: .infinity)
+
+            HomeTicketTearLine()
+                .stroke(
+                    style: StrokeStyle(
+                        lineWidth: 1.2,
+                        lineCap: .round,
+                        dash: [4, 6]
+                    )
+                )
+                .foregroundStyle(ink.opacity(0.48))
+                .frame(height: 1.2)
+                .padding(.horizontal, 20)
+
+            stub
+                .frame(height: Self.stubHeight)
+        }
+        .frame(width: Self.width, height: height)
+        .background { stock }
+        .clipShape(Self.outline)
+        .overlay {
+            Self.outline
+                .strokeBorder(.white.opacity(0.42), lineWidth: 1)
+        }
+        // Collapse text, Canvas artwork, gradients, clip, and outline into one
+        // composited surface. During a swipe the GPU moves that surface instead
+        // of re-compositing the ticket's internal layers for every drag update.
+        .drawingGroup(opaque: false, colorMode: .linear)
+        .shadow(color: .black.opacity(0.22), radius: 4, y: 3)
+        .shadow(color: .black.opacity(0.24), radius: 28, y: 18)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(card.style.label): \(card.title), \(card.primaryLabel) \(card.primaryValue)"
+        )
+    }
+
+    private var mainBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("SERIES NO. \(serial)")
+                Spacer()
+                Text("COVE · \(card.style.label.uppercased())")
+            }
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .tracking(1.2)
+            .foregroundStyle(ink.opacity(0.66))
+
+            HomeTicketPixelField(ink: ink)
+                .frame(height: 118)
+                .padding(.top, 16)
+
+            Spacer(minLength: 12)
+
+            Text(displayTitle.uppercased())
+                .font(.system(size: 34, weight: .black, design: .rounded))
+                .tracking(-1.4)
+                .foregroundStyle(ink)
+                .lineLimit(3)
+                .minimumScaleFactor(0.68)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let subtitle = card.subtitle?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(ink.opacity(0.82))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+            }
+
+            HStack(alignment: .top, spacing: 20) {
+                ticketFact(card.primaryLabel, value: card.primaryValue)
+                ticketFact(card.secondaryLabel, value: card.secondaryValue)
+            }
+            .padding(.top, 18)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
+    }
+
+    private var stub: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top) {
+                ticketFact("Admit", value: admissionValue)
+                Spacer(minLength: 18)
+                ticketFact("Reference", value: referenceValue, trailing: true)
+            }
+
+            HomeTicketBarcode(seed: card.id, ink: ink)
+                .frame(height: 30)
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+    }
+
+    private func ticketFact(
+        _ label: String,
+        value: String,
+        trailing: Bool = false
+    ) -> some View {
+        VStack(alignment: trailing ? .trailing : .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .tracking(1)
+                .foregroundStyle(ink.opacity(0.58))
+
+            Text(value)
+                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .foregroundStyle(ink)
+                .lineLimit(2)
+                .minimumScaleFactor(0.68)
+                .multilineTextAlignment(trailing ? .trailing : .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: trailing ? .trailing : .leading)
+    }
+
+    private var stock: some View {
+        LinearGradient(
+            colors: card.style.homeTicketGradient,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .overlay {
+            RadialGradient(
+                colors: [.white.opacity(0.14), .clear],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 360
+            )
+        }
+        .overlay(alignment: .trailing) {
+            LinearGradient(
+                colors: [.clear, .black.opacity(0.12)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: 96)
+        }
+    }
+
+    private var ink: Color { card.style.homeTicketInk }
+
+    private var displayTitle: String {
+        card.title
+            .replacingOccurrences(of: " · ", with: "\n")
+            .replacingOccurrences(of: " — ", with: "\n")
+    }
+
+    private var serial: String {
+        String(
+            card.id.uuidString
+                .replacingOccurrences(of: "-", with: "")
+                .prefix(3)
+        )
+    }
+
+    private var admissionValue: String {
+        if let seat = card.details.first(where: {
+            $0.label.localizedCaseInsensitiveContains("seat")
+        })?.value {
+            return seat
+        }
+        return switch card.style {
+        case .receipt: "PAID"
+        case .ticket, .generic: "ONE"
+        }
+    }
+
+    private var referenceValue: String {
+        card.details.first { $0.label.localizedCaseInsensitiveContains("reference") }?.value
+            ?? serial
+    }
 }
 
-/// One card's trip through the wave: it lifts off the fan, straightens as it
-/// comes up, casts a deeper shadow at the top, then springs back down. Each
-/// card runs its own copy of this timeline offset by `order`, and the offset
-/// is much shorter than the trip, so several cards are always mid-flight —
-/// that overlap is what makes it a wave instead of a queue.
-private struct FanLiftWave: ViewModifier {
-    let order: Int
-    /// The card's resting fan angle, so the lift can rotate against it.
-    let restingTilt: Angle
-    let trigger: Int
+/// The deepest card only exposes its masthead. The next card remains a complete
+/// pre-rendered ticket so it can be promoted without its details appearing a
+/// frame later.
+private struct HomeTicketBackCard: View {
+    let card: WalletCard
+    let height: CGFloat
 
-    /// Gap between one card starting its rise and the next starting its own.
-    private static let stagger: TimeInterval = 0.075
-    private static let riseDuration: TimeInterval = 0.3
-    private static let settleDuration: TimeInterval = 0.42
+    private static let width: CGFloat = 318
+    private static let outline = HomeTicketShape(
+        cornerRadius: 22,
+        notchRadius: 12,
+        stubHeight: 102
+    )
 
-    /// Nonzero even for the front card — a keyframe needs real duration.
-    private var delay: TimeInterval { 0.01 + Double(order) * Self.stagger }
-    /// Deeper cards travel further; the parallax reads as depth.
-    private var height: CGFloat { 13 + CGFloat(order) * 2 }
+    var body: some View {
+        ZStack(alignment: .top) {
+            LinearGradient(
+                colors: card.style.homeTicketGradient,
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
 
-    func body(content: Content) -> some View {
-        content.keyframeAnimator(initialValue: FanLift(), trigger: trigger) { view, lift in
-            view
-                .rotationEffect(.degrees(-restingTilt.degrees * lift.straighten), anchor: .center)
-                .scaleEffect(lift.scale)
-                .offset(y: lift.rise)
-                .shadow(
-                    color: .black.opacity(0.3 * lift.shadow),
-                    radius: 20 * lift.shadow,
-                    y: 14 * lift.shadow
-                )
-        } keyframes: { _ in
-            // Bouncy on the way up and down: the overshoot at the top is what
-            // makes the card read as light card stock rather than a slab.
-            KeyframeTrack(\.rise) {
-                LinearKeyframe(0, duration: delay)
-                SpringKeyframe(-height, duration: Self.riseDuration, spring: .bouncy(extraBounce: 0.3))
-                SpringKeyframe(0, duration: Self.settleDuration, spring: .bouncy(extraBounce: 0.2))
+            HStack {
+                Text("SERIES \(serial)")
+                Spacer()
+                Text(card.style.label.uppercased())
             }
-            KeyframeTrack(\.scale) {
-                LinearKeyframe(1, duration: delay)
-                SpringKeyframe(1.035, duration: Self.riseDuration, spring: .bouncy(extraBounce: 0.25))
-                SpringKeyframe(1, duration: Self.settleDuration, spring: .snappy)
-            }
-            // Straighten and shadow ride the motion rather than lead it, so
-            // they stay smooth while the height springs past its target.
-            KeyframeTrack(\.straighten) {
-                LinearKeyframe(0, duration: delay)
-                CubicKeyframe(0.55, duration: Self.riseDuration)
-                CubicKeyframe(0, duration: Self.settleDuration)
-            }
-            KeyframeTrack(\.shadow) {
-                LinearKeyframe(0, duration: delay)
-                CubicKeyframe(1, duration: Self.riseDuration)
-                CubicKeyframe(0, duration: Self.settleDuration)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .tracking(1.1)
+            .foregroundStyle(card.style.homeTicketInk.opacity(0.68))
+            .padding(.horizontal, 24)
+            .padding(.top, 22)
+        }
+        .frame(width: Self.width, height: height)
+        .clipShape(Self.outline)
+        .overlay {
+            Self.outline
+                .strokeBorder(.white.opacity(0.32), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 8)
+        .accessibilityHidden(true)
+    }
+
+    private var serial: String {
+        String(
+            card.id.uuidString
+                .replacingOccurrences(of: "-", with: "")
+                .prefix(3)
+        )
+    }
+}
+
+private extension WalletCard.Style {
+    var homeTicketGradient: [Color] {
+        switch self {
+        case .receipt:
+            [
+                Color(red: 0.96, green: 0.34, blue: 0.14),
+                Color(red: 0.72, green: 0.13, blue: 0.08)
+            ]
+        case .ticket:
+            [
+                Color(red: 0.24, green: 0.36, blue: 0.94),
+                Color(red: 0.10, green: 0.20, blue: 0.76)
+            ]
+        case .generic:
+            [
+                Color(red: 0.02, green: 0.62, blue: 0.52),
+                Color(red: 0.02, green: 0.30, blue: 0.43)
+            ]
+        }
+    }
+
+    var homeTicketInk: Color {
+        Color(red: 0.98, green: 0.96, blue: 0.88)
+    }
+}
+
+/// Registration marks that brighten toward the centre, echoing the reference's
+/// halftone field without baking an image into the card.
+private struct HomeTicketPixelField: View {
+    let ink: Color
+
+    private static let columns = 11
+    private static let rows = 7
+
+    var body: some View {
+        Canvas { context, size in
+            let xStep = size.width / CGFloat(Self.columns)
+            let yStep = size.height / CGFloat(Self.rows)
+
+            for row in 0..<Self.rows {
+                for column in 0..<Self.columns {
+                    let strength = Self.intensity(row: row, column: column)
+                    let side = 3.5 + CGFloat(strength) * 3.5
+                    let centre = CGPoint(
+                        x: (CGFloat(column) + 0.5) * xStep,
+                        y: (CGFloat(row) + 0.5) * yStep
+                    )
+                    let rect = CGRect(
+                        x: centre.x - side / 2,
+                        y: centre.y - side / 2,
+                        width: side,
+                        height: side
+                    )
+                    context.fill(
+                        Path(roundedRect: rect, cornerRadius: 1),
+                        with: .color(ink.opacity(0.28 + strength * 0.62))
+                    )
+                }
             }
         }
+        .accessibilityHidden(true)
+    }
+
+    private static func intensity(row: Int, column: Int) -> Double {
+        let dx = Double(column) - Double(Self.columns - 1) / 2
+        let dy = Double(row) - Double(Self.rows - 1) / 2
+        let distance = sqrt(dx * dx + dy * dy)
+        return max(0, 1 - distance / 6.2)
+    }
+}
+
+private struct HomeTicketBarcode: View {
+    let seed: UUID
+    let ink: Color
+
+    private var bars: [CGFloat] {
+        seed.uuidString.utf8.map { byte in
+            CGFloat(Int(byte) % 3 + 1)
+        }
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            guard !bars.isEmpty else { return }
+
+            let gap: CGFloat = 1.8
+            let totalGap = gap * CGFloat(bars.count - 1)
+            let totalUnits = bars.reduce(CGFloat.zero, +)
+            let unit = max((size.width - totalGap) / totalUnits, 0)
+            var x: CGFloat = 0
+
+            for width in bars {
+                let barWidth = width * unit
+                context.fill(
+                    Path(CGRect(x: x, y: 0, width: barWidth, height: size.height)),
+                    with: .color(ink.opacity(0.94))
+                )
+                x += barWidth + gap
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct HomeTicketTearLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        return path
+    }
+}
+
+private struct HomeTicketShape: InsettableShape {
+    let cornerRadius: CGFloat
+    let notchRadius: CGFloat
+    let stubHeight: CGFloat
+    var insetAmount: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let insetRect = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        let body = Path(
+            roundedRect: insetRect,
+            cornerRadius: max(cornerRadius - insetAmount, 0)
+        )
+        let tearY = insetRect.maxY - stubHeight
+
+        var notches = Path()
+        notches.addEllipse(
+            in: CGRect(
+                x: insetRect.minX - notchRadius,
+                y: tearY - notchRadius,
+                width: notchRadius * 2,
+                height: notchRadius * 2
+            )
+        )
+        notches.addEllipse(
+            in: CGRect(
+                x: insetRect.maxX - notchRadius,
+                y: tearY - notchRadius,
+                width: notchRadius * 2,
+                height: notchRadius * 2
+            )
+        )
+        return body.subtracting(notches)
+    }
+
+    func inset(by amount: CGFloat) -> HomeTicketShape {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
     }
 }
 

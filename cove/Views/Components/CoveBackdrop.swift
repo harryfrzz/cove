@@ -77,7 +77,7 @@ struct CoveGradientBackdrop: View {
                 ShaderLibrary.coveEventFlow(
                     .float2(size),
                     .float(loop),
-                    .float4(palette.cycledHue(at: loop), palette.spread, palette.saturation, palette.valueStep),
+                    .float4(palette.driftingHue(at: loop), palette.spread, palette.saturation, palette.valueStep),
                     .float4(palette.phase, palette.spin, palette.ratio, palette.warp),
                     .float4(palette.falloff, palette.radius, palette.harmonic, palette.hueTurns)
                 )
@@ -100,8 +100,8 @@ struct CoveGradientBackdrop: View {
 struct CoveGradientPalette {
     /// Where the palette sits on the wheel at rest.
     var hue: Float
-    /// Which of the anchor families this surface starts on.
-    let anchorIndex: Int
+    /// Which of the anchor families this surface sits on.
+    var anchorIndex: Int
     /// Arc between the three stops. Low is near-monochrome, high throws them
     /// apart into complementary territory — the main source of variety.
     var spread: Float
@@ -136,7 +136,12 @@ struct CoveGradientPalette {
     /// whatever its seed happened to land on.
     ///
     /// - Parameters:
-    ///   - hue: starting point on the wheel.
+    ///   - family: index into the anchor families, wrapped. Pass the surface's
+    ///     position in its row to guarantee no two on screen share a colour —
+    ///     a rolled family collides roughly a quarter of the time with only
+    ///     four to choose from, and two identical cards side by side is exactly
+    ///     what the anchors exist to prevent.
+    ///   - hue: starting point on the wheel. Overrides `family`.
     ///   - spread: how far the three stops sit apart.
     ///   - hueTurns: pass `0` to hold the palette still. Without it a rolled
     ///     value of 1 rotates the whole wheel every loop, so a chosen `hue`
@@ -144,6 +149,7 @@ struct CoveGradientPalette {
     ///     most of its time some other colour entirely.
     init(
         seed id: UUID,
+        family chosenFamily: Int? = nil,
         hue chosenHue: Float? = nil,
         spread chosenSpread: Float? = nil,
         hueTurns chosenTurns: Float? = nil
@@ -181,11 +187,18 @@ struct CoveGradientPalette {
         radius = roll(0.30, 0.46)
         harmonic = 1 + pick(3)
         // The shader's own sweep stays off — it walks the *whole* wheel, which
-        // is what made the page look like a paint box. The cycle is driven from
-        // `cycledHue(at:)` instead, which only ever moves between neighbouring
-        // anchors.
+        // is what made the page look like a paint box. What movement the colour
+        // has comes from `driftingHue(at:)` instead, and never leaves the
+        // family this surface was anchored to.
         hueTurns = 0
 
+        // Rolled above regardless, so pinning the family leaves the motion this
+        // seed produces untouched.
+        if let chosenFamily {
+            anchorIndex = ((chosenFamily % Self.hueAnchors.count) + Self.hueAnchors.count)
+                % Self.hueAnchors.count
+            hue = Self.hueAnchors[anchorIndex]
+        }
         if let chosenHue { hue = chosenHue }
         if let chosenSpread { spread = chosenSpread }
         if let chosenTurns { hueTurns = chosenTurns }
@@ -193,41 +206,26 @@ struct CoveGradientPalette {
 
     /// The families a card can land on, as positions on the colour wheel.
     /// Matched to the wallet's ticket stock — lime, mint, periwinkle, lavender
-    /// — so Upcoming and the passes read as one palette instead of two.
+    /// — so Upcoming and the passes read as one palette instead of two. There
+    /// are exactly as many of these as `HomeDashboardView` shows event cards,
+    /// so pinning each card to its position gives every one its own family.
     private static let hueAnchors: [Float] = [0.22, 0.44, 0.66, 0.80]
 
-    /// Fraction of each segment spent sitting on a colour before easing to the
-    /// next. High, because the point is to *be* four colours, not to be a
-    /// continuous fade that happens to pass through them.
-    private static let hold: Float = 0.72
+    /// How far either side of its anchor a surface's hue travels, as a fraction
+    /// of the wheel. Small on purpose: this is the difference between a card
+    /// that breathes and a card that changes colour on you. Anything past about
+    /// `0.03` starts crossing into the neighbouring family.
+    private static let drift: Float = 0.014
 
     /// Where this surface's colour sits at a point in the loop.
     ///
-    /// Walks the anchors in order, starting from this card's own — so the loop
-    /// visits four colours and returns, and two cards on screen are rarely on
-    /// the same one. Interpolation is always between *neighbouring* anchors, so
-    /// the surface can never wander into the hues the palette excludes.
-    func cycledHue(at loop: Float) -> Float {
-        let anchors = Self.hueAnchors
-        let count = anchors.count
-
-        let position = loop * Float(count) + Float(anchorIndex)
-        let index = Int(position.rounded(.down))
-        let progress = position - position.rounded(.down)
-
-        let from = anchors[((index % count) + count) % count]
-        let to = anchors[((index + 1) % count + count) % count]
-
-        // Hold, then a smoothstep across the remainder.
-        let raw = max(0, progress - Self.hold) / (1 - Self.hold)
-        let eased = raw * raw * (3 - 2 * raw)
-
-        // Shortest way round the wheel, so lime → lavender doesn't sweep back
-        // through everything between them.
-        var delta = to - from
-        if delta > 0.5 { delta -= 1 }
-        if delta < -0.5 { delta += 1 }
-        return from + delta * eased
+    /// A slow sway either side of the card's own anchor, never a walk between
+    /// them — a card keeps the colour it opened with, and what moves is the
+    /// light rather than the identity. `phase` de-syncs the sway from the other
+    /// cards, and being a whole sine over `loop` it closes back on itself
+    /// exactly like the rest of the animation.
+    func driftingHue(at loop: Float) -> Float {
+        hue + sin((loop + phase) * 2 * .pi) * Self.drift
     }
 
     /// splitmix64 finalizer over the raw UUID bytes. The avalanche matters —

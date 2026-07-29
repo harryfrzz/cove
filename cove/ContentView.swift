@@ -5,6 +5,7 @@
 //  Created by Harikrishna C on 22/07/26.
 //
 
+import FoundationModels
 import SwiftData
 import SwiftUI
 
@@ -23,6 +24,7 @@ struct ContentView: View {
     @State private var quickCapture = QuickCaptureCoordinator.shared
     @State private var categorizer = ShelfCategorizer.shared
     @State private var importer = GalleryImporter.shared
+    @State private var aiSession: LanguageModelSession?
 
     var body: some View {
         ZStack {
@@ -30,19 +32,16 @@ struct ContentView: View {
 
             switch tab {
             case .home:
-                NavigationStack {
-                    HomeDashboardView(onOpenWallet: { tab = .wallet })
-                }
-            case .shelf:
                 ShelfView { addMode = .photo }
-            case .chat:
-                NavigationStack { ChatView() }
             case .wallet:
-                NavigationStack { WalletView() }
+                NavigationStack { HomeDashboardView() }
+            case .upcoming:
+                NavigationStack { UpcomingView() }
             case .profile:
                 ProfileView(
-                    onOpenShelf: { tab = .shelf },
-                    onOpenWallet: { tab = .wallet }
+                    onOpenShelf: { tab = .home },
+                    onOpenWallet: { tab = .wallet },
+                    onOpenUpcoming: { tab = .upcoming }
                 )
             }
         }
@@ -54,7 +53,8 @@ struct ContentView: View {
             CoveTabBar(
                 selection: $tab,
                 onCamera: { isShowingCamera = true },
-                onAdd: { addMode = $0 }
+                onAdd: { addMode = $0 },
+                onAIPrompt: submitAIPrompt
             )
         }
         .sheet(item: $addMode) { mode in
@@ -77,13 +77,13 @@ struct ContentView: View {
                 tab = .wallet
             }
             if ProcessInfo.processInfo.arguments.contains("--open-shelf") {
-                tab = .shelf
+                tab = .home
             }
             if ProcessInfo.processInfo.arguments.contains("--open-profile") {
                 tab = .profile
             }
-            if ProcessInfo.processInfo.arguments.contains("--open-chat") {
-                tab = .chat
+            if ProcessInfo.processInfo.arguments.contains("--open-upcoming") {
+                tab = .upcoming
             }
 #endif
             await categorizer.prepareIfNeeded()
@@ -122,6 +122,51 @@ struct ContentView: View {
         Task {
             await ShelfProcessor.shared.enqueue(itemID: itemID)
         }
+    }
+
+    /// Answers the dock's one-shot prompt without navigating to a separate
+    /// chat screen. The model stays on-device and receives a compact snapshot
+    /// of the user's shelf as context.
+    private func submitAIPrompt(_ text: String) async -> String {
+        if let unavailable = FoundationModelsService.availabilityError() {
+            return unavailable.errorDescription ?? "The on-device model is unavailable."
+        }
+
+        let active = aiSession ?? LanguageModelSession(instructions: aiInstructions)
+        aiSession = active
+
+        do {
+            let response = try await active.respond(to: text)
+            let answer = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            return answer.isEmpty ? "I couldn't find an answer for that." : answer
+        } catch {
+            return "That didn't go through — \(error.localizedDescription)"
+        }
+    }
+
+    private var aiInstructions: String {
+        """
+        You are Cove, an assistant for a personal shelf of saved screenshots, \
+        tickets, receipts, links, and notes. Answer in one or two short \
+        sentences. Use the saved items below when relevant, and say you cannot \
+        find something rather than inventing details.
+
+        Saved items:
+        \(aiShelfDigest)
+        """
+    }
+
+    private var aiShelfDigest: String {
+        let lines = items
+            .filter { $0.processingState == .ready }
+            .prefix(12)
+            .map { item -> String in
+                let detail = item.summary
+                    ?? item.extraction?.shortTitle
+                    ?? item.kind.label
+                return "- \(item.title): \(detail)"
+            }
+        return lines.isEmpty ? "(nothing saved yet)" : lines.joined(separator: "\n")
     }
 
     private var processingActivitySnapshot: String {

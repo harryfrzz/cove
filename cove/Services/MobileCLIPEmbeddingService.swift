@@ -48,6 +48,54 @@ actor MobileCLIPEmbeddingService: EmbeddingService {
     /// the first load. Never hardcode this elsewhere.
     private(set) var embeddingDimension: Int?
 
+    // MARK: - Readiness
+
+    /// What the setup screen needs to know about the encoders. A value type, so
+    /// it can cross back to the main actor.
+    struct Readiness: Sendable, Equatable {
+        /// Both encoders are compiled and resident.
+        var isLoaded: Bool
+        /// Both `.mlmodelc` packages are actually in the bundle. False means a
+        /// broken install — there is nothing the app can fetch to repair it.
+        var isBundled: Bool
+        var dimension: Int?
+        var inputSize: Int?
+        var version: String
+    }
+
+    var readiness: Readiness {
+        Readiness(
+            isLoaded: loaded != nil,
+            isBundled: Self.isBundled,
+            dimension: loaded?.embeddingDimension,
+            inputSize: loaded?.imageInputSize,
+            version: Self.modelVersion
+        )
+    }
+
+    /// Both encoders ship inside the app binary, so this is a file check rather
+    /// than a network one — there is no download path to fall back to.
+    nonisolated static var isBundled: Bool {
+        ((try? bundledModelURL(named: "MobileCLIP2S0ImageEncoder")) != nil)
+            && ((try? bundledModelURL(named: "MobileCLIP2S0TextEncoder")) != nil)
+    }
+
+    /// Compile and resident-load both encoders now instead of on the first
+    /// capture. Throws what the load threw, so the caller can show the reason.
+    @discardableResult
+    func prepare() async throws -> Readiness {
+        _ = try await load()
+        return readiness
+    }
+
+    /// Drop the compiled models. The next call re-reads them from the bundle,
+    /// which is the closest thing to a reinstall the app can do for something
+    /// it ships rather than downloads.
+    func unload() {
+        loaded = nil
+        embeddingDimension = nil
+    }
+
     func embed(image: UIImage) async throws -> [Float] {
         let models = try await load()
         guard let pixelBuffer = Self.pixelBuffer(
@@ -123,7 +171,7 @@ actor MobileCLIPEmbeddingService: EmbeddingService {
         return models
     }
 
-    private static func bundledModelURL(named name: String) throws -> URL {
+    static func bundledModelURL(named name: String) throws -> URL {
         guard let url = Bundle.main.url(forResource: name, withExtension: "mlmodelc") else {
             throw EmbeddingError.modelMissing(name)
         }

@@ -61,7 +61,29 @@ struct ChatView: View {
         }
     }
 
+    @ViewBuilder
     private var transcript: some View {
+        // An empty chat is a whole blank page, so the invitation is centered
+        // in it rather than stacked at the top of a scroll view that has
+        // nothing to scroll.
+        if messages.isEmpty, !isResponding {
+            emptyState
+                .safeAreaBar(edge: .top) { header }
+        } else {
+            conversation
+                .safeAreaBar(edge: .top) { header }
+                .scrollEdgeEffectStyle(.soft, for: .top)
+        }
+    }
+
+    private var header: some View {
+        topBar
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+    }
+
+    private var conversation: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -69,12 +91,8 @@ struct ChatView: View {
                         unavailableBanner(unavailable)
                     }
 
-                    if messages.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(messages) { message in
-                            bubble(message)
-                        }
+                    ForEach(messages) { message in
+                        bubble(message)
                     }
 
                     if isResponding {
@@ -96,13 +114,6 @@ struct ChatView: View {
             .onChange(of: messages) { _, _ in scrollToBottom(proxy) }
             .onChange(of: isResponding) { _, _ in scrollToBottom(proxy) }
         }
-        .safeAreaBar(edge: .top) {
-            topBar
-                .padding(.horizontal, 20)
-                .padding(.top, 4)
-                .padding(.bottom, 8)
-        }
-        .scrollEdgeEffectStyle(.soft, for: .top)
     }
 
     private static let bottomAnchor = "coveChatBottom"
@@ -171,51 +182,39 @@ struct ChatView: View {
 
     // MARK: - Empty state
 
+    /// The whole page before the first question: one invitation, centered,
+    /// with nothing to tap. Prompt chips were doing the opposite of their job
+    /// here — three canned questions read as the limit of what could be asked,
+    /// when the point is that you type whatever you are actually after.
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Ask about anything on your shelf.")
-                .font(.system(.title3, design: .serif, weight: .semibold))
+        VStack(spacing: 12) {
+            if let unavailable {
+                unavailableBanner(unavailable)
+                    .padding(.bottom, 8)
+            }
+
+            Image(systemName: "sparkles")
+                .font(.system(size: 30, weight: .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(CoveTheme.ink.opacity(0.6))
+                .padding(.bottom, 2)
+
+            Text("What are you looking for?")
+                .font(.system(.title2, design: .serif, weight: .semibold))
                 .foregroundStyle(CoveTheme.ink)
 
-            Text("Answers are drawn from your saved items and stay on this device.")
-                .font(.footnote)
+            Text("Ask about anything you've saved — a ticket, a receipt, that screenshot you can't name. It's all searched here on your device.")
+                .font(.subheadline)
                 .foregroundStyle(CoveTheme.inkSecondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Self.suggestions, id: \.self) { suggestion in
-                    Button {
-                        draft = suggestion
-                        send()
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(suggestion)
-                                .font(.subheadline)
-                                .foregroundStyle(CoveTheme.ink)
-                                .multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                            Image(systemName: "arrow.up.right")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(CoveTheme.ink.opacity(0.4))
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 18))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(unavailable != nil)
-                }
-            }
-            .padding(.top, 4)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 24)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 32)
+        // Sits a touch above true center: the composer owns the bottom of the
+        // page, and text centered against the full height reads as low.
+        .padding(.bottom, 40)
     }
-
-    private static let suggestions = [
-        "What do I have coming up?",
-        "How much did I spend recently?",
-        "Find the ticket with my seat number."
-    ]
 
     // MARK: - Unavailable
 

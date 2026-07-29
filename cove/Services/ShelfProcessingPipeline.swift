@@ -46,6 +46,31 @@ actor ShelfProcessor {
         enqueue(itemID: itemID)
     }
 
+    /// Put every finished item back through both encoders, without redoing OCR
+    /// or the language model. Driven from the models screen: after the encoders
+    /// are reloaded there is no way to tell whether what is stored still
+    /// matches what they now produce, and re-running them is cheap next to
+    /// answering a search with vectors from a model that is no longer there.
+    ///
+    /// Returns how many items were queued so the screen can say so.
+    @discardableResult
+    func reindexEmbeddings() -> Int {
+        let ready = (try? modelContext.fetch(FetchDescriptor<ShelfItem>()))?.filter {
+            $0.processingState == .ready
+        } ?? []
+
+        var queued = 0
+        for item in ready where !reembedQueue.contains(item.id) {
+            reembedQueue.append(item.id)
+            queued += 1
+        }
+        drainSoon()
+        return queued
+    }
+
+    /// Items still waiting on a re-index pass.
+    var pendingReindexCount: Int { reembedQueue.count }
+
     /// Startup reconciliation: anything left `.processing` by a kill goes back
     /// to `.queued` and is re-run; `.ready` items embedded with an older model
     /// version are re-embedded so vectors stay comparable.

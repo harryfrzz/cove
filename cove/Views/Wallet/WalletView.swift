@@ -246,15 +246,7 @@ struct WalletView: View {
                     CoverFlowCarousel(cards: cards, selectedID: $selectedID)
 
                     pageDots
-
-                    if let card = visibleCard {
-                        WalletDetailPanel(card: card)
-                            // Rebuilding on id change is what gives the panel
-                            // something to transition *between*.
-                            .id(card.id)
-                            .transition(panelTransition)
-                            .padding(.top, 18)
-                    }
+                        .padding(.top, 4)
 
                     Text("\(cards.count) pass\(cards.count == 1 ? "" : "es") · built from your screenshots")
                         .font(.footnote)
@@ -264,9 +256,18 @@ struct WalletView: View {
                     Spacer(minLength: 8)
                 }
                 .padding(.horizontal, 20)
-                // The carousel is greedy, so the caption lands at the foot of
-                // the page — which is where the floating dock is drawn.
-                .padding(.bottom, CoveTabBar.occupiedHeight)
+                // Reserved rather than overlaid: the pass is the thing being
+                // looked at, and a sheet that covers it to describe it is
+                // working against itself.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if let card = visibleCard {
+                        WalletDetailPanel(card: card)
+                            // Rebuilding on id change is what gives the panel
+                            // something to transition *between*.
+                            .id(card.id)
+                            .transition(panelTransition)
+                    }
+                }
             }
         }
         // Cove's own header rather than the system navigation bar: Wallet was
@@ -297,35 +298,47 @@ struct WalletView: View {
         .onChange(of: selectedID) { previous, current in
             guard let current, current != visibleID else { return }
             slideForward = index(of: current) >= index(of: previous)
+            // Damped harder than the carousel's own settle: the panel carries
+            // text, and overshoot on a paragraph reads as a wobble rather than
+            // as weight.
             withAnimation(
-                reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.78)
+                reduceMotion ? nil : .spring(response: 0.52, dampingFraction: 0.88)
             ) {
                 visibleID = current
             }
         }
     }
 
-    /// Thumbnail, title, and facts travel as one block. The outgoing panel
-    /// shrinks, blurs, and fades as it recedes the way the finger went; the
-    /// incoming one scales up from 96% and sharpens into focus.
+    /// Thumbnail, title, and facts travel as one block, and the block turns.
+    ///
+    /// The panel swings in on the same vertical axis the covers above it rotate
+    /// around, hinged on the edge the finger came from — so the sheet reads as
+    /// the back face of the pass being turned to, not as a second list sliding
+    /// past. It also sits down a few points and rises as it squares up, which
+    /// is what keeps a pure rotation from looking like it is on rails.
     private var panelTransition: AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let travel: CGFloat = 46
         return .asymmetric(
             insertion: .modifier(
                 active: PanelPhase(
-                    dx: slideForward ? travel : -travel,
-                    blur: 6,
-                    scale: 0.96,
+                    dx: slideForward ? 54 : -54,
+                    dy: 10,
+                    angle: slideForward ? -26 : 26,
+                    anchor: slideForward ? .leading : .trailing,
+                    blur: 7,
+                    scale: 0.95,
                     opacity: 0
                 ),
                 identity: PanelPhase.settled
             ),
             removal: .modifier(
                 active: PanelPhase(
-                    dx: slideForward ? -travel : travel,
-                    blur: 6,
-                    scale: 0.94,
+                    dx: slideForward ? -44 : 44,
+                    dy: 6,
+                    angle: slideForward ? 20 : -20,
+                    anchor: slideForward ? .trailing : .leading,
+                    blur: 9,
+                    scale: 0.93,
                     opacity: 0
                 ),
                 identity: PanelPhase.settled
@@ -385,13 +398,18 @@ private struct CoverFlowCarousel: View {
     @State private var index = 0
     @State private var drag: CGFloat = 0
 
-    static let cardHeight: CGFloat = 158
+    static let cardHeight: CGFloat = 206
 
     /// Turn angle of a card one full step off centre.
     private static let maxAngle: Double = 42
     /// Neighbours land at 82% — small enough to sit behind, large enough to
     /// still read as a card rather than a chip.
     private static let sideScale: CGFloat = 0.18
+    /// Fraction of an over-drag past the first or last pass that actually
+    /// moves. The deck is not a loop, and a hard stop at the ends reads as a
+    /// dropped gesture — this gives the edge somewhere to go and a reason to
+    /// come back.
+    private static let edgeResistance: CGFloat = 0.32
 
     /// How many cards either side of centre get built. Spacing compresses past
     /// the first neighbour, so nothing beyond about ±2.5 is still on screen —
@@ -425,7 +443,7 @@ private struct CoverFlowCarousel: View {
     var body: some View {
         GeometryReader { proxy in
             let width = proxy.size.width
-            let cardWidth = min(width * 0.80, 340)
+            let cardWidth = min(width * 0.88, 376)
             let step = cardWidth * 0.46
             let progress = CGFloat(index) - drag / Self.dragPerCard
 
@@ -454,6 +472,11 @@ private struct CoverFlowCarousel: View {
         .onChange(of: index) { _, new in
             guard cards.indices.contains(new) else { return }
             selectedID = cards[new].id
+        }
+        // A pass leaving the wallet can strand the deck past its own end.
+        .onChange(of: cards.count) { _, count in
+            index = min(index, max(count - 1, 0))
+            drag = 0
         }
     }
 
@@ -525,7 +548,7 @@ private struct CoverFlowCarousel: View {
     private var swipe: some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
-                drag = value.translation.width
+                drag = resisted(value.translation.width)
             }
             .onEnded { value in
                 let travel = value.translation.width
@@ -549,12 +572,28 @@ private struct CoverFlowCarousel: View {
 
                 let target = min(max(index + steps, 0), max(cards.count - 1, 0))
                 withAnimation(
-                    reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.78)
+                    reduceMotion ? nil : .spring(response: 0.46, dampingFraction: 0.82)
                 ) {
                     index = target
                     drag = 0
                 }
             }
+    }
+
+    /// Drag, with everything past the ends of the deck damped instead of
+    /// followed. Distances are in points; the range is what is left in front of
+    /// and behind the pass currently centred.
+    private func resisted(_ raw: CGFloat) -> CGFloat {
+        let ahead = CGFloat(max(cards.count - 1 - index, 0)) * Self.dragPerCard
+        let behind = CGFloat(index) * Self.dragPerCard
+
+        if raw < -ahead {
+            return -ahead - (-raw - ahead) * Self.edgeResistance
+        }
+        if raw > behind {
+            return behind + (raw - behind) * Self.edgeResistance
+        }
+        return raw
     }
 
     private func syncFromSelection() {
@@ -569,6 +608,9 @@ private struct CoverFlowCarousel: View {
 
 private struct PanelPhase: ViewModifier {
     let dx: CGFloat
+    var dy: CGFloat = 0
+    var angle: Double = 0
+    var anchor: UnitPoint = .center
     let blur: CGFloat
     let scale: CGFloat
     let opacity: Double
@@ -578,9 +620,18 @@ private struct PanelPhase: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scaleEffect(scale)
+            .rotation3DEffect(
+                .degrees(angle),
+                axis: (x: 0, y: 1, z: 0),
+                anchor: anchor,
+                // Shallower than the carousel's 0.62. The panel is a wide, flat
+                // block, and at the covers' perspective its far edge stretched
+                // far enough to tear.
+                perspective: 0.42
+            )
             .blur(radius: blur)
             .opacity(opacity)
-            .offset(x: dx)
+            .offset(x: dx, y: dy)
     }
 }
 
@@ -668,16 +719,45 @@ private struct WalletDetailPanel: View {
 
             openButton
         }
-        .padding(16)
+        .padding(.horizontal, 20)
+        .padding(.top, 18)
+        // The floating dock is drawn over the foot of this sheet, so the call
+        // to action has to clear it rather than sit underneath it.
+        .padding(.bottom, CoveTabBar.occupiedHeight + 10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minHeight: 132, alignment: .top)
-        .background(.white.opacity(0.6), in: .rect(cornerRadius: 22))
+        // Glass, not the flat white this was: the sheet runs edge to edge under
+        // the deck now, and an opaque slab that wide cut the page in half.
+        // Blurring what passes behind it is also what tells you the pass is
+        // still up there.
+        .glassEffect(.regular, in: Self.sheetShape)
         .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .strokeBorder(CoveTheme.hairline, lineWidth: 1)
+            Self.sheetShape
+                .stroke(CoveTheme.hairline, lineWidth: 1)
+                .mask(alignment: .top) {
+                    // Only the top edge. The stroke is there to catch the light
+                    // where the sheet meets the page; carried around the sides
+                    // it draws a box around something with no bottom.
+                    LinearGradient(
+                        colors: [.white, .white.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: 120)
+                }
         }
-        .shadow(color: .black.opacity(0.07), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.10), radius: 18, y: -6)
+        .ignoresSafeArea(edges: .bottom)
     }
+
+    /// Rounded at the top, square at the bottom: this is a surface the page
+    /// slides under, not a card floating on it.
+    private static let sheetShape = UnevenRoundedRectangle(
+        topLeadingRadius: 30,
+        bottomLeadingRadius: 0,
+        bottomTrailingRadius: 0,
+        topTrailingRadius: 30
+    )
 
     /// Full-width call to action closing the panel, the way a product card
     /// ends in its one obvious next step.
@@ -966,38 +1046,7 @@ struct WalletPassDetailView: View {
 
             GeometryReader { proxy in
                 ScrollView {
-                    VStack(spacing: 20) {
-                        WalletCardView(
-                            card: card,
-                            height: 196,
-                            cornerRadius: expanded ? 14 : 24,
-                            showsShadow: false
-                        )
-                        .scaleEffect(expanded ? 1 : 0.92)
-                        .animation(stage(0.10), value: expanded)
-                        .passShadow(lift: expanded ? 1.3 : 0.45)
-                        .animation(stage(0), value: expanded)
-                        .gesture(dismissDrag)
-
-                        Group {
-                            if card.item.imageData != nil {
-                                sourceShot
-                            }
-
-                            caption
-                        }
-                        .opacity(detailsIn ? 1 : 0)
-                        .offset(y: detailsIn ? 0 : 16)
-                        .blur(radius: detailsIn ? 0 : 4)
-                        .animation(stage(0), value: detailsIn)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 28)
-                    .frame(minHeight: proxy.size.height, alignment: .center)
-                    .offset(y: max(dragOffset, 0))
-                    .scaleEffect(1 - dragProgress * 0.06)
-                    .blur(radius: dragProgress * 4)
-                    .opacity(1 - dragProgress * 0.35)
+                    passSheet(minHeight: proxy.size.height)
                 }
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
@@ -1027,6 +1076,46 @@ struct WalletPassDetailView: View {
             .padding(.top, 8)
             .accessibilityLabel("Close pass")
         }
+    }
+
+    /// The scrolling body of the pass: card on top, source shot and caption
+    /// staged in underneath. Held in its own function rather than inline in the
+    /// `ScrollView` — as one expression the whole thing is more than the type
+    /// checker can resolve, and it fails the `ScrollView` initializer as
+    /// ambiguous rather than pointing at anything here.
+    private func passSheet(minHeight: CGFloat) -> some View {
+        VStack(spacing: 20) {
+            WalletCardView(
+                card: card,
+                height: 196,
+                cornerRadius: expanded ? 14 : 24,
+                showsShadow: false
+            )
+            .scaleEffect(expanded ? 1 : 0.92)
+            .animation(stage(0.10), value: expanded)
+            .passShadow(lift: expanded ? 1.3 : 0.45)
+            .animation(stage(0), value: expanded)
+            .gesture(dismissDrag)
+
+            Group {
+                if card.item.imageData != nil {
+                    sourceShot
+                }
+
+                caption
+            }
+            .opacity(detailsIn ? 1 : 0)
+            .offset(y: detailsIn ? 0 : 16)
+            .blur(radius: detailsIn ? 0 : 4)
+            .animation(stage(0), value: detailsIn)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 28)
+        .frame(minHeight: minHeight, alignment: .center)
+        .offset(y: max(dragOffset, 0))
+        .scaleEffect(1 - dragProgress * 0.06)
+        .blur(radius: dragProgress * 4)
+        .opacity(1 - dragProgress * 0.35)
     }
 
     private var dismissDrag: some Gesture {

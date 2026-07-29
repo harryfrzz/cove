@@ -125,7 +125,7 @@ struct ShelfView: View {
 
     private var topBar: some View {
         VStack(spacing: 12) {
-            CoveScreenHeader("Shelf") {
+            CoveScreenHeader("Home") {
 #if DEBUG
                 NavigationLink {
                     AIDiagnosticsView()
@@ -239,7 +239,7 @@ struct ShelfView: View {
                 .foregroundStyle(CoveTheme.ink)
 
             VStack(spacing: 8) {
-                Text("Your shelf is clear")
+                Text("Nothing saved yet")
                     .font(.system(.title2, design: .serif, weight: .semibold))
                     .foregroundStyle(CoveTheme.ink)
                 Text("Drop in a screenshot, link, or thought.\nCove keeps it local and easy to find.")
@@ -267,7 +267,7 @@ struct ShelfView: View {
     }
 }
 
-#Preview("Empty shelf") {
+#Preview("Empty home") {
     ShelfView()
         .modelContainer(for: ShelfItem.self, inMemory: true)
         .environment(\.aiServices, .mock)
