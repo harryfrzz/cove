@@ -356,6 +356,6 @@ private extension Duration {
 #Preview("Models") {
     NavigationStack {
         ModelSetupView()
-            .modelContainer(for: ShelfItem.self, inMemory: true)
+            .modelContainer(for: [ShelfItem.self, ChatThread.self], inMemory: true)
     }
 }

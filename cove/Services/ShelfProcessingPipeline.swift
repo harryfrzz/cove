@@ -71,6 +71,12 @@ actor ShelfProcessor {
     /// Items still waiting on a re-index pass.
     var pendingReindexCount: Int { reembedQueue.count }
 
+    /// Lets pull-to-refresh keep its progress treatment alive until both newly
+    /// imported images and explicitly refreshed embeddings have settled.
+    var isBusy: Bool {
+        isDraining || !queue.isEmpty || !reembedQueue.isEmpty
+    }
+
     /// Startup reconciliation: anything left `.processing` by a kill goes back
     /// to `.queued` and is re-run; `.ready` items embedded with an older model
     /// version are re-embedded so vectors stay comparable.

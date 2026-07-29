@@ -156,9 +156,15 @@ struct MasonryWall: View {
                 face(placed, columnWidth: columnWidth, isSelected: false)
             }
             .buttonStyle(.plain)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    CoveHaptics.impact(.soft)
+                }
+            )
             // Long press is the standard way into multi-select, and it's how
             // people already expect to start one in Photos.
             .onLongPressGesture {
+                CoveHaptics.impact(.medium)
                 selection.wrappedValue = [placed.id]
             }
         }
@@ -186,6 +192,7 @@ struct MasonryWall: View {
     }
 
     private func toggle(_ id: UUID) {
+        CoveHaptics.selection()
         var current = selection.wrappedValue ?? []
         if current.contains(id) {
             current.remove(id)

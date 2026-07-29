@@ -106,8 +106,6 @@ struct CoveTabBar: View {
         .padding(.horizontal, 18)
         .padding(.vertical, 6)
         .animation(reduceMotion ? nil : Self.morph, value: isInputExpanded)
-        .sensoryFeedback(.selection, trigger: selection)
-        .sensoryFeedback(.selection, trigger: isInputExpanded)
     }
 
     private var tabPill: some View {
@@ -123,6 +121,7 @@ struct CoveTabBar: View {
     }
 
     private func select(_ tab: CoveTab) {
+        CoveHaptics.selection()
         guard selection != tab else { return }
         if reduceMotion {
             selection = tab
@@ -318,6 +317,7 @@ struct CoveTabBar: View {
 
     private func expandInput(from tab: CoveTab) {
         guard !isInputExpanded else { return }
+        CoveHaptics.impact(.medium)
         promptTask?.cancel()
         submittedPrompt = ""
         responseText = nil
@@ -339,6 +339,7 @@ struct CoveTabBar: View {
     }
 
     private func collapseInput() {
+        CoveHaptics.selection()
         promptTask?.cancel()
         promptTask = nil
         isInputFocused = false
@@ -358,6 +359,7 @@ struct CoveTabBar: View {
     private func submitPrompt() {
         let prompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isResponding else { return }
+        CoveHaptics.impact(.light)
         isInputFocused = false
         submittedPrompt = prompt
         promptText = ""
@@ -380,6 +382,7 @@ struct CoveTabBar: View {
         Menu {
             if CameraCaptureView.isAvailable {
                 Button {
+                    CoveHaptics.impact(.medium)
                     onCamera()
                 } label: {
                     Label("Camera", systemImage: "camera")
@@ -387,6 +390,7 @@ struct CoveTabBar: View {
             }
             ForEach(AddCaptureMode.allCases) { mode in
                 Button {
+                    CoveHaptics.impact(.medium)
                     onAdd(mode)
                 } label: {
                     Label(mode.rawValue, systemImage: mode.systemImage)

@@ -2,20 +2,6 @@ import FoundationModels
 import SwiftData
 import SwiftUI
 
-/// One turn in the conversation. Kept as a value type so the transcript is
-/// plain view state — the model session below owns the *real* history, this
-/// array only owns what is drawn.
-struct ChatMessage: Identifiable, Equatable {
-    enum Role {
-        case user
-        case assistant
-    }
-
-    let id = UUID()
-    let role: Role
-    var text: String
-}
-
 /// Ask-your-shelf surface. Deliberately plain for now: a transcript, an input
 /// bar, and the on-device model behind it. No tool calls, no citations, no
 /// per-item threading — those are the things that will want design attention,
@@ -25,18 +11,38 @@ struct ChatMessage: Identifiable, Equatable {
 /// extraction pipeline uses, primed with a short digest of what is on the
 /// shelf. Nothing leaves the device, so an unavailable model is a normal
 /// state here rather than an error — it gets its own banner.
+///
+/// The transcript is `ChatThread` on disk rather than view state, so an answer
+/// survives closing this screen — and so the dock's one-shot prompt, which
+/// writes to the same thread, is not a conversation that only the model
+/// remembers.
 struct ChatView: View {
-    @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
+    /// Zero when presented as a sheet; the shell's dock only overlaps this
+    /// screen when it is hosted in a tab.
+    var bottomInset: CGFloat = CoveTabBar.occupiedHeight
 
-    @State private var messages: [ChatMessage] = []
+    @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
+    /// Newest first, so `first` is the conversation to resume.
+    @Query(sort: \ChatThread.updatedAt, order: .reverse) private var threads: [ChatThread]
+    @Environment(\.modelContext) private var modelContext
+
+    /// The conversation on screen. `nil` means "a new one", which is only
+    /// written to disk once there is something in it — otherwise history would
+    /// fill with blank threads.
+    @State private var thread: ChatThread?
     @State private var draft = ""
     @State private var isResponding = false
     /// Holds the transcript, so follow-up questions know what was already
-    /// asked. Built on the first send, cleared when the transcript is.
+    /// asked. Built on the first send, dropped when the thread changes.
     @State private var session: LanguageModelSession?
     @State private var unavailable: FoundationModelsService.ModelUnavailable?
+    @State private var isShowingHistory = false
 
     @FocusState private var isInputFocused: Bool
+
+    private var turns: [ChatTurn] {
+        thread?.orderedTurns ?? []
+    }
 
     /// How much of the shelf is described to the model. The system model's
     /// context window is small and shared with the instructions, so this is a
@@ -52,12 +58,17 @@ struct ChatView: View {
             inputBar
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, CoveTabBar.occupiedHeight)
+                .padding(.bottom, bottomInset)
         }
         .background(CoveInkBackground())
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             unavailable = FoundationModelsService.availabilityError()
+            // Resume where the last answer landed, wherever it was asked from.
+            if thread == nil { thread = threads.first }
+        }
+        .sheet(isPresented: $isShowingHistory) {
+            historySheet
         }
     }
 
@@ -66,7 +77,7 @@ struct ChatView: View {
         // An empty chat is a whole blank page, so the invitation is centered
         // in it rather than stacked at the top of a scroll view that has
         // nothing to scroll.
-        if messages.isEmpty, !isResponding {
+        if turns.isEmpty, !isResponding {
             emptyState
                 .safeAreaBar(edge: .top) { header }
         } else {
@@ -91,8 +102,11 @@ struct ChatView: View {
                         unavailableBanner(unavailable)
                     }
 
-                    ForEach(messages) { message in
-                        bubble(message)
+                    // Keyed on the stored id rather than the model's own
+                    // identity, so a bubble is the same view before and after
+                    // the context saves it.
+                    ForEach(turns, id: \.id) { turn in
+                        bubble(turn)
                     }
 
                     if isResponding {
@@ -111,8 +125,9 @@ struct ChatView: View {
             }
             .scrollIndicators(.hidden)
             .scrollDismissesKeyboard(.interactively)
-            .onChange(of: messages) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: turns.count) { _, _ in scrollToBottom(proxy) }
             .onChange(of: isResponding) { _, _ in scrollToBottom(proxy) }
+            .onChange(of: thread?.id) { _, _ in scrollToBottom(proxy) }
         }
     }
 
@@ -126,24 +141,102 @@ struct ChatView: View {
 
     // MARK: - Chrome
 
-    /// Same header every other tab wears. Starting a fresh conversation only
-    /// appears once there is one to discard.
+    /// Same header every other tab wears. Past conversations appear on the
+    /// leading side once there is more than the one on screen; starting a fresh
+    /// conversation only appears once this one has something in it.
     private var topBar: some View {
-        CoveScreenHeader("Chat") {
-            if !messages.isEmpty {
-                Button(action: clear) {
-                    CoveHeaderIcon(systemImage: "square.and.pencil")
+        CoveScreenHeader(
+            "Chat",
+            leading: {
+                if hasHistory {
+                    Button {
+                        CoveHaptics.selection()
+                        isShowingHistory = true
+                    } label: {
+                        CoveHeaderIcon(systemImage: "clock")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Past conversations")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New conversation")
+            },
+            trailing: {
+                if !turns.isEmpty {
+                    Button(action: startNewConversation) {
+                        CoveHeaderIcon(systemImage: "square.and.pencil")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("New conversation")
+                }
+            }
+        )
+    }
+
+    /// Anything worth opening a list for: another thread, or this one already
+    /// filed away while a new conversation is being started.
+    private var hasHistory: Bool {
+        threads.contains { $0.id != thread?.id && !$0.turns.isEmpty }
+    }
+
+    // MARK: - History
+
+    private var historySheet: some View {
+        NavigationStack {
+            List {
+                ForEach(threads.filter { !$0.turns.isEmpty }, id: \.id) { entry in
+                    Button {
+                        open(entry)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entry.title.isEmpty ? "Untitled" : entry.title)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(CoveTheme.ink)
+                                .lineLimit(2)
+
+                            Text(
+                                "\(entry.turns.count) messages · \(entry.updatedAt.formatted(.relative(presentation: .named)))"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(CoveTheme.inkSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onDelete(perform: deleteThreads)
+            }
+            .navigationTitle("Conversations")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { isShowingHistory = false }
+                }
             }
         }
+    }
+
+    /// Resuming cannot restore the model's own transcript, so the session is
+    /// dropped here and rebuilt on the next send from a recap of this thread.
+    private func open(_ entry: ChatThread) {
+        CoveHaptics.selection()
+        thread = entry
+        session = nil
+        isShowingHistory = false
+    }
+
+    private func deleteThreads(at offsets: IndexSet) {
+        let listed = threads.filter { !$0.turns.isEmpty }
+        let doomed = offsets.compactMap { listed.indices.contains($0) ? listed[$0] : nil }
+        // Deleting the conversation on screen leaves the page on a fresh one
+        // rather than on a thread the store no longer has.
+        if doomed.contains(where: { $0.id == thread?.id }) {
+            thread = nil
+            session = nil
+        }
+        modelContext.deleteChatThreads(doomed)
     }
 
     // MARK: - Transcript
 
     @ViewBuilder
-    private func bubble(_ message: ChatMessage) -> some View {
+    private func bubble(_ message: ChatTurn) -> some View {
         let body = Text(message.text)
             .font(.callout)
             .foregroundStyle(message.role == .user ? CoveTheme.background : CoveTheme.ink)
@@ -278,8 +371,12 @@ struct ChatView: View {
         guard !question.isEmpty, !isResponding, unavailable == nil else { return }
 
         draft = ""
+        // Built before the question is stored, so a resumed thread's recap does
+        // not repeat what is about to be asked anyway.
+        let primer = instructions
+
         withAnimation(.easeOut(duration: 0.2)) {
-            messages.append(ChatMessage(role: .user, text: question))
+            record(role: .user, text: question)
             isResponding = true
         }
 
@@ -294,46 +391,62 @@ struct ChatView: View {
                 return
             }
 
-            let active = session ?? LanguageModelSession(instructions: instructions)
+            let active = session ?? LanguageModelSession(instructions: primer)
             session = active
 
             do {
                 let response = try await active.respond(to: question)
                 let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
                 withAnimation(.easeOut(duration: 0.2)) {
-                    messages.append(
-                        ChatMessage(
-                            role: .assistant,
-                            text: text.isEmpty ? "I don't have an answer for that yet." : text
-                        )
+                    record(
+                        role: .assistant,
+                        text: text.isEmpty ? "I don't have an answer for that yet." : text
                     )
                 }
             } catch {
                 withAnimation(.easeOut(duration: 0.2)) {
-                    messages.append(
-                        ChatMessage(
-                            role: .assistant,
-                            text: "That didn't go through — \(error.localizedDescription)"
-                        )
+                    record(
+                        role: .assistant,
+                        text: "That didn't go through — \(error.localizedDescription)"
                     )
                 }
             }
         }
     }
 
-    private func clear() {
+    /// Writes a turn to disk, creating the thread on the first one so an
+    /// abandoned empty chat never becomes a history row.
+    private func record(role: ChatRole, text: String) {
+        let target: ChatThread
+        if let thread {
+            target = thread
+        } else {
+            target = ChatThread()
+            modelContext.insert(target)
+            thread = target
+        }
+
+        modelContext.insert(target.append(role: role, text: text))
+        try? modelContext.save()
+    }
+
+    /// Leaves the current thread in history and starts an empty one. The
+    /// session goes with it — a new conversation should not inherit the last
+    /// one's context.
+    private func startNewConversation() {
         withAnimation(.easeOut(duration: 0.2)) {
-            messages.removeAll()
+            thread = nil
         }
         session = nil
         unavailable = FoundationModelsService.availabilityError()
     }
 
-    /// The shelf digest the session is primed with. Built once per session so
-    /// the transcript stays consistent with what the model was told, even if
-    /// the pipeline finishes more items mid-conversation.
+    /// The shelf digest the session is primed with, plus a recap when an older
+    /// thread is resumed. Built once per session so the transcript stays
+    /// consistent with what the model was told, even if the pipeline finishes
+    /// more items mid-conversation.
     private var instructions: String {
-        """
+        var text = """
         You are Cove, an assistant for a personal shelf of saved screenshots, \
         tickets, receipts, links, and notes. Answer in one or two short \
         sentences. Use the saved items below when they are relevant, and say \
@@ -342,7 +455,26 @@ struct ChatView: View {
         Saved items:
         \(shelfDigest)
         """
+
+        if let recap {
+            text += "\n\nEarlier in this conversation:\n\(recap)"
+        }
+
+        return text
     }
+
+    /// A resumed thread cannot restore the model's own transcript, so the last
+    /// few turns are replayed as instructions instead. A recap, not the real
+    /// history — the context window is small and shared with the shelf digest.
+    private var recap: String? {
+        let recent = turns.suffix(Self.recapTurnLimit)
+        guard !recent.isEmpty else { return nil }
+        return recent
+            .map { "\($0.role == .user ? "Asked" : "Answered"): \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    private static let recapTurnLimit = 6
 
     private var shelfDigest: String {
         let lines = items
@@ -360,6 +492,6 @@ struct ChatView: View {
 
 #Preview("Chat") {
     ChatView()
-        .modelContainer(for: ShelfItem.self, inMemory: true)
+        .modelContainer(for: [ShelfItem.self, ChatThread.self], inMemory: true)
         .environment(\.aiServices, .mock)
 }

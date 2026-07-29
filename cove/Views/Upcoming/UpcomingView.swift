@@ -1,16 +1,28 @@
 import SwiftData
 import SwiftUI
+import UIKit
 
-/// A dedicated chronological view for events and dated tickets. It deliberately
-/// avoids another collection of cards: dates, a fine timeline, and the event
-/// copy itself are the interface.
+/// A dedicated chronological view for events and dated tickets. Each entry is
+/// presented as an observation specimen: a playful technical record rather
+/// than another Wallet ticket.
 struct UpcomingView: View {
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
     @Namespace private var detailNamespace
+    /// Set by tapping a card in the deck; the list rows below still push
+    /// through their own `NavigationLink`.
+    @State private var openedEntryID: UUID?
 
     private static let dateDetector = try? NSDataDetector(
         types: NSTextCheckingResult.CheckingType.date.rawValue
     )
+
+    /// How many of the soonest events are dealt into the pile. Matches Wallet's
+    /// deck depth; everything further out stays a list, where a date you are
+    /// scanning for is quicker to find than behind a run of swipes.
+    private static let deckCount = 3
+    /// `UpcomingEventCard` is otherwise free to grow with its title; the deck
+    /// needs one fixed height or the peek between cards drifts per card.
+    private static let cardHeight: CGFloat = 236
 
     private var entries: [UpcomingEntry] {
         let startOfToday = Calendar.current.startOfDay(for: .now)
@@ -75,21 +87,29 @@ struct UpcomingView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 14) {
-                        sectionLabel
+                        deck
 
-                        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                        laterHeading
+
+                        if laterEntries.isEmpty {
+                            laterEmptyNote
+                        }
+
+                        ForEach(laterEntries) { entry in
                             NavigationLink {
                                 ItemDetailView(item: entry.item)
                                     .navigationTransition(
                                         .zoom(sourceID: entry.id, in: detailNamespace)
                                     )
                             } label: {
-                                UpcomingEventCard(
-                                    entry: entry,
-                                    colorIndex: index
-                                )
+                                UpcomingEventCard(entry: entry)
                             }
                             .buttonStyle(.plain)
+                            .simultaneousGesture(
+                                TapGesture().onEnded {
+                                    CoveHaptics.impact(.soft)
+                                }
+                            )
                             .matchedTransitionSource(id: entry.id, in: detailNamespace)
                         }
                     }
@@ -102,6 +122,14 @@ struct UpcomingView: View {
                 .scrollEdgeEffectHidden(true, for: .bottom)
             }
         }
+        // The deck cannot use a `NavigationLink` — a Button swallows the touches
+        // its swipe needs — so the soonest events push from here instead.
+        .navigationDestination(item: $openedEntryID) { id in
+            if let entry = entries.first(where: { $0.id == id }) {
+                ItemDetailView(item: entry.item)
+                    .navigationTransition(.zoom(sourceID: id, in: detailNamespace))
+            }
+        }
         .safeAreaBar(edge: .top) {
             topBar
                 .padding(.horizontal, 20)
@@ -109,6 +137,67 @@ struct UpcomingView: View {
                 .padding(.bottom, 8)
         }
         .toolbar(.hidden, for: .navigationBar)
+    }
+
+    /// The soonest events, stacked. Square rather than fanned: Wallet's lean
+    /// suits printed ticket stock, these are posters and a tilt reads as a
+    /// mistake on them.
+    private var deck: some View {
+        CoveCardDeck(
+            cards: deckEntries,
+            cardHeight: Self.cardHeight,
+            peek: 34,
+            maxCards: Self.deckCount,
+            openActionName: "Open event",
+            namespace: detailNamespace,
+            onSelect: { openedEntryID = $0.id }
+        ) { entry, _ in
+            UpcomingEventCard(entry: entry)
+        }
+    }
+
+    private var laterHeading: some View {
+        Text("Later")
+            .font(.system(size: 12, weight: .semibold))
+            .tracking(1.8)
+            .textCase(.uppercase)
+            .foregroundStyle(CoveTheme.ink.opacity(0.45))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    /// The heading stays even with nothing under it, so a short list reads as
+    /// "that is everything" rather than as a section that failed to load.
+    private var laterEmptyNote: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle")
+                .font(.subheadline)
+                .foregroundStyle(CoveTheme.ink.opacity(0.5))
+
+            Text(
+                entries.count == 1
+                    ? "Just the one event for now."
+                    : "Nothing further out — everything coming up is in the stack above."
+            )
+            .font(.footnote)
+            .foregroundStyle(CoveTheme.inkSecondary)
+            .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .accessibilityElement(children: .combine)
+    }
+
+    private var deckEntries: [UpcomingEntry] {
+        Array(entries.prefix(Self.deckCount))
+    }
+
+    private var laterEntries: [UpcomingEntry] {
+        Array(entries.dropFirst(Self.deckCount))
     }
 
     private var topBar: some View {
@@ -120,21 +209,6 @@ struct UpcomingView: View {
                 .glassEffect(.regular, in: Circle())
                 .accessibilityLabel("\(entries.count) upcoming")
         }
-    }
-
-    private var sectionLabel: some View {
-        HStack(spacing: 8) {
-            Text("ON THE HORIZON")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .tracking(1.5)
-                .foregroundStyle(CoveTheme.inkSecondary)
-
-            Rectangle()
-                .fill(CoveTheme.ink.opacity(0.12))
-                .frame(height: 1)
-        }
-        .padding(.bottom, 2)
-        .accessibilityHidden(true)
     }
 
     private var emptyState: some View {
@@ -178,136 +252,152 @@ private struct UpcomingEntry: Identifiable {
     let item: ShelfItem
 }
 
-/// One standalone event card. A narrow colour seam and a dedicated date column
-/// distinguish each item without returning to the dense ticket treatment used
-/// by Wallet.
+/// A compact event poster using the same blue and warm ink as Wallet tickets.
 private struct UpcomingEventCard: View {
     let entry: UpcomingEntry
-    let colorIndex: Int
 
-    private static let accents: [Color] = [
-        Color(red: 0.18, green: 0.31, blue: 0.88),
-        Color(red: 0.92, green: 0.27, blue: 0.10),
-        Color(red: 0.02, green: 0.48, blue: 0.39),
-        Color(red: 0.43, green: 0.23, blue: 0.76),
-        Color(red: 0.76, green: 0.13, blue: 0.35)
-    ]
+    @Environment(\.colorScheme) private var colorScheme
 
-    private var accent: Color {
-        Self.accents[colorIndex % Self.accents.count]
-    }
+    private static let blueTop = Color(red: 0.24, green: 0.36, blue: 0.94)
+    private static let blueBottom = Color(red: 0.10, green: 0.20, blue: 0.76)
+    private static let warmInk = Color(red: 0.98, green: 0.96, blue: 0.88)
+    private var secondaryText: Color { Self.warmInk.opacity(0.68) }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            dateStamp
+        VStack(alignment: .leading, spacing: 0) {
+            titlePanel
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
 
-            Rectangle()
-                .fill(CoveTheme.ink.opacity(0.10))
-                .frame(width: 1)
+            Spacer(minLength: 18)
 
-            details
+            bottomInfo
+                .padding(.horizontal, 20)
+                .padding(.bottom, 16)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 18)
-        .frame(maxWidth: .infinity, minHeight: 166, alignment: .leading)
-        .background(accent.opacity(0.055), in: RoundedRectangle(cornerRadius: 28))
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 28))
-        .overlay(alignment: .leading) {
-            Capsule()
-                .fill(accent)
-                .frame(width: 4)
-                .padding(.vertical, 24)
+        .frame(maxWidth: .infinity, minHeight: 228, alignment: .leading)
+        .background {
+            LinearGradient(
+                colors: [Self.blueTop, Self.blueBottom],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .overlay(alignment: .topLeading) {
+            RadialGradient(
+                colors: [Color.white.opacity(0.12), .clear],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 220
+            )
+            .allowsHitTesting(false)
         }
         .overlay {
-            RoundedRectangle(cornerRadius: 28)
-                .strokeBorder(accent.opacity(0.14), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
         }
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .shadow(
+            color: Color.black.opacity(colorScheme == .dark ? 0.34 : 0.16),
+            radius: colorScheme == .dark ? 18 : 14,
+            y: 8
+        )
         .contentShape(.rect(cornerRadius: 28))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
 
-    private var dateStamp: some View {
-        VStack(spacing: 0) {
-            Text(day)
-                .font(.system(size: 44, weight: .semibold, design: .serif).monospacedDigit())
-                .foregroundStyle(CoveTheme.ink)
+    private var titlePanel: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(entry.title)
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .tracking(-0.8)
+                    .foregroundStyle(Self.warmInk)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.68)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            Text(month)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                .tracking(1.2)
-                .foregroundStyle(accent)
+                Spacer(minLength: 0)
 
-            if let date = entry.date {
-                Text(date.formatted(.dateTime.year()))
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .foregroundStyle(CoveTheme.inkSecondary.opacity(0.72))
-                    .padding(.top, 4)
+                Text(relativeDate.uppercased())
+                    .font(.system(size: 8, weight: .black, design: .monospaced))
+                    .tracking(0.55)
+                    .foregroundStyle(Self.warmInk)
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .background(Self.warmInk.opacity(0.13), in: Capsule())
             }
 
-            Spacer(minLength: 0)
-
-            Circle()
-                .fill(accent)
-                .frame(width: 7, height: 7)
-                .overlay {
-                    Circle()
-                        .stroke(accent.opacity(0.18), lineWidth: 6)
-                }
-                .padding(.bottom, 6)
+            if let location = clean(entry.location) {
+                Label(location, systemImage: "mappin")
+                    .font(.caption)
+                    .foregroundStyle(secondaryText)
+                    .lineLimit(1)
+            }
         }
-        .frame(width: 54)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var details: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Text(entry.kind.uppercased())
-                Text("·")
-                Text(relativeDate.uppercased())
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .bold))
-            }
-            .font(.system(size: 8, weight: .bold, design: .monospaced))
-            .tracking(1)
-            .foregroundStyle(accent)
+    private var bottomInfo: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Color.clear
+                .frame(width: 112, height: 88)
 
-            Text(entry.title)
-                .font(.system(.title3, design: .serif, weight: .semibold))
-                .foregroundStyle(CoveTheme.ink)
-                .lineLimit(3)
-                .minimumScaleFactor(0.82)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(month)
+                    .font(.system(size: 15, weight: .black, design: .monospaced))
+                    .tracking(1.2)
+                Text(year)
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .tracking(1)
+                    .opacity(0.64)
+            }
+            .foregroundStyle(Self.warmInk)
+            .padding(.bottom, 7)
 
             Spacer(minLength: 8)
 
-            if let timeLabel {
-                metadata(systemImage: "clock", text: timeLabel)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text("STARTS")
+                    .font(.system(size: 7, weight: .bold, design: .monospaced))
+                    .tracking(1)
+                    .foregroundStyle(secondaryText)
+
+                Text(timeLabel)
+                    .font(.system(size: 15, weight: .bold, design: .rounded))
+                    .foregroundStyle(Self.warmInk)
+                    .lineLimit(1)
             }
-            if let location = clean(entry.location) {
-                metadata(systemImage: "mappin", text: location)
-                    .padding(.top, 5)
-            }
+            .padding(.bottom, 7)
+
+            Image(systemName: "arrow.up.right")
+                .font(.system(size: 11, weight: .black))
+                .foregroundStyle(Self.blueBottom)
+                .frame(width: 32, height: 32)
+                .background(Self.warmInk, in: Circle())
+                .padding(.bottom, 2)
+        }
+        .overlay(alignment: .bottomLeading) {
+            OutlinedDay(text: day, color: UIColor(Self.warmInk))
+                .frame(width: 160, height: 112, alignment: .bottomLeading)
+                // Oversized and deliberately pushed beyond both edges so the
+                // rounded card crops it like display type on a poster.
+                .offset(x: -40, y: 46)
+                .accessibilityHidden(true)
         }
     }
 
-    private func metadata(systemImage: String, text: String) -> some View {
-        Label(text, systemImage: systemImage)
-            .font(.caption)
-            .foregroundStyle(CoveTheme.inkSecondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.76)
-            .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private var day: String {
-        entry.date?.formatted(.dateTime.day()) ?? "–"
+        entry.date?.formatted(.dateTime.day(.twoDigits)) ?? "–"
     }
 
     private var month: String {
         entry.date?.formatted(.dateTime.month(.abbreviated)).uppercased() ?? "TBD"
+    }
+
+    private var year: String {
+        entry.date?.formatted(.dateTime.year()) ?? "TBD"
     }
 
     private var relativeDate: String {
@@ -317,11 +407,11 @@ private struct UpcomingEventCard: View {
         return date.formatted(.relative(presentation: .named))
     }
 
-    private var timeLabel: String? {
+    private var timeLabel: String {
         if let date = entry.date {
-            return date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
+            return date.formatted(.dateTime.hour().minute())
         }
-        return clean(entry.printedDate)
+        return clean(entry.printedDate) ?? "TBD"
     }
 
     private var accessibilityText: String {
@@ -337,9 +427,42 @@ private struct UpcomingEventCard: View {
     }
 }
 
+/// UIKit's stroke-only glyph rendering gives the date the outlined poster
+/// treatment without adding a background tile behind it.
+private struct OutlinedDay: UIViewRepresentable {
+    let text: String
+    let color: UIColor
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.backgroundColor = .clear
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.68
+        label.baselineAdjustment = .alignBaselines
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        let baseFont = UIFont.systemFont(ofSize: 116, weight: .black)
+        let descriptor = baseFont.fontDescriptor.withDesign(.rounded) ?? baseFont.fontDescriptor
+        let font = UIFont(descriptor: descriptor, size: 116)
+
+        label.attributedText = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .strokeColor: color,
+                .strokeWidth: 2.25,
+                .foregroundColor: UIColor.clear,
+                .kern: -3
+            ]
+        )
+    }
+}
+
 #Preview {
     NavigationStack {
         UpcomingView()
     }
-    .modelContainer(for: ShelfItem.self, inMemory: true)
+    .modelContainer(for: [ShelfItem.self, ChatThread.self], inMemory: true)
 }

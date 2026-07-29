@@ -1,18 +1,18 @@
 import SwiftUI
 import UIKit
 
-/// Cove's minimal theme: warm cream and soft ink by day, the same pair
-/// inverted by night. Both schemes are built from the *same* warm hue rather
-/// than a neutral grey — the dark surface is a deep umber, so the glass and
-/// the paper cards keep reading as the same material after dark.
+/// Cove's minimal theme: white and soft ink by day, inverted by night. Both
+/// canvases are now plain — white by day, true black after dark — so
+/// screenshots, passes, and Liquid Glass sit in clear relief instead of over a
+/// tinted wash that competed with them.
 ///
 /// Every colour is a `UIColor` with a trait-based provider rather than two
 /// static values chosen at launch, so a scheme change repaints live and any
 /// `.opacity()` taken off one of these stays dynamic.
 enum CoveTheme {
     static let background = dynamic(
-        light: UIColor(red: 0.962, green: 0.941, blue: 0.887, alpha: 1),
-        dark: UIColor(red: 0.086, green: 0.078, blue: 0.070, alpha: 1)
+        light: .white,
+        dark: .black
     )
 
     static let ink = dynamic(

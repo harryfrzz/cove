@@ -150,17 +150,6 @@ private struct WalletFanStack: View {
     let namespace: Namespace.ID
     let onSelect: (WalletCard) -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// How far the deck has been swiped through, in cards.
-    @State private var cycle = 0
-    /// Horizontal travel of the card being thrown, and which card that is —
-    /// tracked by id, not by slot, so the throw stays with the departing pass
-    /// once the deck reorders underneath it.
-    @State private var swipeX: CGFloat = 0
-    @State private var swipingID: UUID?
-    /// Locks the deck while its three-stage throw/reorder/return is underway.
-    @State private var isCycling = false
-
     /// Matches `HomeTicketCard` — the fan sizes its own container from this,
     /// so the two have to move together.
     private static let cardHeight: CGFloat = 510
@@ -170,165 +159,25 @@ private struct WalletFanStack: View {
     /// as broken, an emblem strip reads as a stack.
     private static let peek: CGFloat = 42
     private static let maxCards = 3
-    /// Headroom above and below the fan so a lifted card never clips.
-    private static let liftRoom: CGFloat = 22
-    /// Sideways travel that commits to sending the front pass to the back.
-    private static let swipeThreshold: CGFloat = 56
-    /// How far the thrown card carries before the deck reorders behind it.
-    private static let throwDistance: CGFloat = 380
-    private static let throwDuration: TimeInterval = 0.2
-    /// The newly exposed front cards settle before the old front ticket
-    /// returns from off-screen into the rear slot.
-    private static let reorderDuration: TimeInterval = 0.22
-    private static let returnDuration: TimeInterval = 0.48
-
-    /// The latest few passes — the whole deck the home fan ever deals with.
-    private var deck: [WalletCard] { Array(cards.prefix(Self.maxCards)) }
-
-    /// That deck rotated to wherever swiping has left it. Swiping cycles
-    /// within these cards rather than pulling further back through the
-    /// wallet, so the pass thrown off the front lands in the back slot and
-    /// stays there instead of dropping out of the fan.
-    private var shown: [WalletCard] {
-        guard !deck.isEmpty else { return [] }
-        let start = ((cycle % deck.count) + deck.count) % deck.count
-        return Array(deck[start...] + deck[..<start])
-    }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            // Order 0 is the front pass; it draws on top and sits lowest.
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, card in
-                // Deliberately not a Button. `.gesture` sits at lower
-                // precedence than gestures a subview defines, and a Button
-                // handles its touches internally — so the swipe below never
-                // got to start. A tap gesture at this level competes fairly
-                // with the drag: the tap loses the moment the finger travels.
-                Group {
-                    // Keep the next ticket fully rendered underneath the
-                    // current one. It is already rasterised when promoted, so
-                    // its details never pop in after the move. Only the third
-                    // ticket uses the inexpensive masthead-only placeholder.
-                    if index < 2 {
-                        HomeTicketCard(card: card, height: Self.cardHeight)
-                    } else {
-                        HomeTicketBackCard(card: card, height: Self.cardHeight)
-                    }
-                }
-                    .contentShape(.rect(cornerRadius: 24))
-                    .scaleEffect(1 - CGFloat(index) * 0.015)
-                    .rotationEffect(Self.tilt(order: index), anchor: .center)
-                    // Zoom reads the frame recorded here, so it has to sit inside
-                    // the padding below — that padding is what actually places the
-                    // card in the fan.
-                    .matchedTransitionSource(id: card.id, in: namespace)
-                    // Fan spacing as real layout, not `.offset`. An offset moves
-                    // pixels but leaves the layout frame at the bottom of the
-                    // stack, which is exactly the frame the zoom transition would
-                    // return the pass to — the passes above the front one would
-                    // drop to the wrong place on close.
-                    .padding(.bottom, CGFloat(index) * Self.peek)
-                    .offset(
-                        x: Self.fanOffset(order: index)
-                            + (card.id == swipingID ? swipeX : 0)
-                    )
-                    .rotationEffect(
-                        .degrees(card.id == swipingID ? Double(swipeX) * 0.018 : 0),
-                        anchor: .bottom
-                    )
-                    // Swipe only belongs to the pass on top; the rest keep their
-                    // tap. `.subviews` disables this gesture without disabling
-                    // the tap attached below it.
-                    .gesture(cycleDrag(card: card), including: index == 0 ? .all : .subviews)
-                    .onTapGesture { onSelect(card) }
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityAction(named: "Open pass") { onSelect(card) }
-                    .accessibilityAction(named: "Send to back") {
-                        cycleFan(direction: -1, card: card)
-                    }
-                    .zIndex(-Double(index))
-            }
-        }
-        .allowsHitTesting(!isCycling)
-        .frame(maxWidth: .infinity)
-        .frame(
-            height: Self.cardHeight + CGFloat(max(shown.count - 1, 0)) * Self.peek + 14,
-            alignment: .bottom
-        )
-        .padding(.horizontal, 6)
-        .padding(.top, 4 + Self.liftRoom)
-        .padding(.bottom, 8 + Self.liftRoom)
-    }
-
-    // MARK: - Swipe to cycle
-
-    /// Sideways drag on the front pass. `minimumDistance` keeps taps going to
-    /// the button underneath, and the gesture is only attached to order 0.
-    private func cycleDrag(card: WalletCard) -> some Gesture {
-        DragGesture(minimumDistance: 18)
-            .onChanged { value in
-                swipingID = card.id
-                swipeX = value.translation.width
-            }
-            .onEnded { value in
-                // Flick counts as well as distance, so a short fast swipe
-                // still sends the pass back.
-                let travel = value.translation.width + value.predictedEndTranslation.width * 0.25
-                guard abs(travel) > Self.swipeThreshold else {
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) {
-                        swipeX = 0
-                    }
-                    return
-                }
-                cycleFan(direction: travel < 0 ? -1 : 1, card: card)
-            }
-    }
-
-    /// Front pass goes to the back, everything behind it steps forward. Three
-    /// beats: throw the card clear, promote the waiting cards, then return the
-    /// thrown card from the side after it owns the rear z-position.
-    private func cycleFan(direction: CGFloat, card: WalletCard) {
-        guard deck.count > 1 else {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) { swipeX = 0 }
-            return
-        }
-        guard !isCycling else { return }
-
-        isCycling = true
-        swipingID = card.id
-
-        if reduceMotion {
-            cycle += 1
-            swipeX = 0
-            swipingID = nil
-            isCycling = false
-            return
-        }
-
-        withAnimation(.easeIn(duration: Self.throwDuration)) {
-            swipeX = direction * Self.throwDistance
-        }
-
-        Task { @MainActor in
-            // First let the front ticket clear the deck completely.
-            try? await Task.sleep(for: .seconds(Self.throwDuration))
-
-            // Keep that ticket parked off-screen while the remaining cards
-            // step forward. Its id now belongs to the rear, so its return will
-            // be painted underneath the promoted cards.
-            withAnimation(.snappy(duration: Self.reorderDuration, extraBounce: 0.04)) {
-                cycle += 1
-            }
-            try? await Task.sleep(for: .seconds(Self.reorderDuration * 0.72))
-
-            // Only now bring the old front ticket back, into its new rear slot.
-            withAnimation(.spring(response: Self.returnDuration, dampingFraction: 0.8)) {
-                swipeX = 0
-            }
-
-            try? await Task.sleep(for: .seconds(Self.returnDuration))
-            if swipingID == card.id { swipingID = nil }
-            isCycling = false
+        CoveCardDeck(
+            cards: cards,
+            cardHeight: Self.cardHeight,
+            peek: Self.peek,
+            maxCards: Self.maxCards,
+            restingTilt: Self.tilt(order:),
+            restingOffset: Self.fanOffset(order:),
+            openActionName: "Open pass",
+            namespace: namespace,
+            onSelect: onSelect
+        ) { card, _ in
+            // Every depth draws the full ticket. A masthead-only placeholder
+            // used to stand in at the rear, which is invisible at rest — only
+            // the top strip shows — but the throw exposes that whole card on
+            // its way past, so the pile flashed a blank pass and then popped
+            // into a real one when it was promoted.
+            HomeTicketCard(card: card, height: Self.cardHeight)
         }
     }
 
@@ -353,6 +202,7 @@ private struct WalletFanStack: View {
         }
     }
 }
+
 
 // MARK: - Home portrait ticket
 
@@ -552,58 +402,6 @@ private struct HomeTicketCard: View {
     }
 }
 
-/// The deepest card only exposes its masthead. The next card remains a complete
-/// pre-rendered ticket so it can be promoted without its details appearing a
-/// frame later.
-private struct HomeTicketBackCard: View {
-    let card: WalletCard
-    let height: CGFloat
-
-    private static let width: CGFloat = 318
-    private static let outline = HomeTicketShape(
-        cornerRadius: 22,
-        notchRadius: 12,
-        stubHeight: 102
-    )
-
-    var body: some View {
-        ZStack(alignment: .top) {
-            LinearGradient(
-                colors: card.style.homeTicketGradient,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-
-            HStack {
-                Text("SERIES \(serial)")
-                Spacer()
-                Text(card.style.label.uppercased())
-            }
-            .font(.system(size: 9, weight: .bold, design: .monospaced))
-            .tracking(1.1)
-            .foregroundStyle(card.style.homeTicketInk.opacity(0.68))
-            .padding(.horizontal, 24)
-            .padding(.top, 22)
-        }
-        .frame(width: Self.width, height: height)
-        .clipShape(Self.outline)
-        .overlay {
-            Self.outline
-                .strokeBorder(.white.opacity(0.32), lineWidth: 1)
-        }
-        .shadow(color: .black.opacity(0.18), radius: 12, y: 8)
-        .accessibilityHidden(true)
-    }
-
-    private var serial: String {
-        String(
-            card.id.uuidString
-                .replacingOccurrences(of: "-", with: "")
-                .prefix(3)
-        )
-    }
-}
-
 private extension WalletCard.Style {
     var homeTicketGradient: [Color] {
         switch self {
@@ -762,6 +560,6 @@ private struct HomeTicketShape: InsettableShape {
     NavigationStack {
         HomeDashboardView()
     }
-    .modelContainer(for: ShelfItem.self, inMemory: true)
+    .modelContainer(for: [ShelfItem.self, ChatThread.self], inMemory: true)
     .environment(\.aiServices, .mock)
 }

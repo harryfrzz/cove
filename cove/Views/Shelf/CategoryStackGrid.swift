@@ -46,6 +46,11 @@ struct CategoryStackGrid: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                CoveHaptics.impact(.soft)
+                            }
+                        )
                         .matchedTransitionSource(id: spec.id, in: pileNamespace)
                         .onGeometryChange(for: CGRect.self) { proxy in
                             proxy.frame(in: .global)

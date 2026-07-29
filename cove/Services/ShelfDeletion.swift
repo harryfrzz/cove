@@ -22,4 +22,15 @@ extension ModelContext {
         }
         try? save()
     }
+
+    /// Removes conversations permanently. `ChatThread.turns` cascades, so the
+    /// turns go with the thread and there is nothing else to sweep up — a
+    /// transcript is text and dates, never a file on disk.
+    func deleteChatThreads(_ threads: [ChatThread]) {
+        guard !threads.isEmpty else { return }
+        for thread in threads {
+            delete(thread)
+        }
+        try? save()
+    }
 }

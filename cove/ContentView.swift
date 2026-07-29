@@ -15,6 +15,9 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
+    /// Newest first, so dock prompts land in the conversation the chat screen
+    /// would resume rather than starting a thread each time.
+    @Query(sort: \ChatThread.updatedAt, order: .reverse) private var threads: [ChatThread]
 
     @AppStorage(CoveAppearance.storageKey) private var appearance = CoveAppearance.system
 
@@ -38,11 +41,7 @@ struct ContentView: View {
             case .upcoming:
                 NavigationStack { UpcomingView() }
             case .profile:
-                ProfileView(
-                    onOpenShelf: { tab = .home },
-                    onOpenWallet: { tab = .wallet },
-                    onOpenUpcoming: { tab = .upcoming }
-                )
+                ProfileView()
             }
         }
         // Follows the system unless the profile page says otherwise. Applied
@@ -127,6 +126,11 @@ struct ContentView: View {
     /// Answers the dock's one-shot prompt without navigating to a separate
     /// chat screen. The model stays on-device and receives a compact snapshot
     /// of the user's shelf as context.
+    ///
+    /// Both sides of the exchange are written to the newest `ChatThread` on the
+    /// way past. The dock's card is discarded when it collapses, and `aiSession`
+    /// outlives it — without this the model would keep context the user had no
+    /// way to see again.
     private func submitAIPrompt(_ text: String) async -> String {
         if let unavailable = FoundationModelsService.availabilityError() {
             return unavailable.errorDescription ?? "The on-device model is unavailable."
@@ -135,13 +139,33 @@ struct ContentView: View {
         let active = aiSession ?? LanguageModelSession(instructions: aiInstructions)
         aiSession = active
 
+        let answer: String
         do {
             let response = try await active.respond(to: text)
-            let answer = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            return answer.isEmpty ? "I couldn't find an answer for that." : answer
+            let content = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            answer = content.isEmpty ? "I couldn't find an answer for that." : content
         } catch {
-            return "That didn't go through — \(error.localizedDescription)"
+            answer = "That didn't go through — \(error.localizedDescription)"
         }
+
+        record(question: text, answer: answer)
+        return answer
+    }
+
+    /// Appends the exchange to the conversation the chat screen will resume,
+    /// starting one if there is none yet.
+    private func record(question: String, answer: String) {
+        let thread: ChatThread
+        if let existing = threads.first {
+            thread = existing
+        } else {
+            thread = ChatThread()
+            modelContext.insert(thread)
+        }
+
+        modelContext.insert(thread.append(role: .user, text: question))
+        modelContext.insert(thread.append(role: .assistant, text: answer))
+        try? modelContext.save()
     }
 
     private var aiInstructions: String {
@@ -179,6 +203,6 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .modelContainer(for: ShelfItem.self, inMemory: true)
+        .modelContainer(for: [ShelfItem.self, ChatThread.self], inMemory: true)
         .environment(\.aiServices, .mock)
 }

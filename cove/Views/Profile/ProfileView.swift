@@ -4,26 +4,17 @@ import SwiftUI
 /// Profile tab. Cove has no account system — the name is stored locally and
 /// exists so the shelf feels like *yours*, not so anything can be signed into.
 ///
-/// The page is built around one idea Liquid Glass can do that a blur cannot:
-/// glass shapes that **merge and split**. The shelf's categories are pebbles
-/// sized by how much each holds, floating in a single `GlassEffectContainer`
-/// so neighbours fuse where they crowd each other. Tapping one morphs that
-/// pebble — the same glass, not a crossfade — into the panel that describes
-/// it, and tapping away lets it fall back into the cluster.
-///
-/// It all sits on Cove's flat cream. Glass reads more quietly there than it
-/// did over the gradient this replaced: with nothing behind it to refract, the
-/// material falls back to a soft tint and its edge highlight, so the pebbles'
-/// *sizes* carry the page rather than their surface.
+/// The page is one indexed-files headline over the switches that belong to the
+/// app rather than to the shelf. It all sits on Cove's flat canvas, where glass
+/// reads quietly: with nothing behind it to refract, the material falls back to
+/// a soft tint and its edge highlight.
 struct ProfileView: View {
-    var onOpenShelf: () -> Void = {}
-    var onOpenWallet: () -> Void = {}
-    var onOpenUpcoming: () -> Void = {}
-
     @Query(sort: \ShelfItem.createdAt, order: .reverse) private var items: [ShelfItem]
+    /// Only read by "Delete everything" — conversations have no other presence
+    /// on this page.
+    @Query private var threads: [ChatThread]
     @Environment(\.modelContext) private var modelContext
     @State private var isConfirmingEraseAll = false
-    @State private var categorizer = ShelfCategorizer.shared
     @State private var importer = GalleryImporter.shared
 
     /// Stamped the first time this screen is opened. Deliberately *not* derived
@@ -35,24 +26,14 @@ struct ProfileView: View {
     /// rather than a piece of the shelf.
     @AppStorage(CoveAppearance.storageKey) private var appearance = CoveAppearance.system
 
-    /// Which pebble is currently expanded, if any.
-    @State private var openBucket: ShelfBucket?
-    /// Shared by every glass shape on the page, so they can morph into one
-    /// another rather than fade.
-    @Namespace private var glass
-
     var body: some View {
         NavigationStack {
             ZStack(alignment: .top) {
                 CoveInkBackground()
-                    // Tapping the backdrop is how you close an open pebble.
-                    .contentShape(.rect)
-                    .onTapGesture { close() }
 
                 ScrollView {
                     VStack(spacing: 26) {
                         hero
-                        cluster
                         footer
                     }
                     .padding(.horizontal, 20)
@@ -76,14 +57,6 @@ struct ProfileView: View {
     }
 
     // MARK: - Derived
-
-    private var buckets: [(bucket: ShelfBucket, items: [ShelfItem])] {
-        categorizer.group(items)
-    }
-
-    private var largestBucket: Int {
-        max(buckets.map(\.items.count).max() ?? 1, 1)
-    }
 
     private var unfinishedCount: Int {
         items.filter { $0.processingState != .ready }.count
@@ -118,26 +91,6 @@ struct ProfileView: View {
         guard startedAt > 0 else { return nil }
         return Date(timeIntervalSince1970: startedAt)
             .formatted(.dateTime.month(.abbreviated).year())
-    }
-
-    /// Buckets in rows of three, biggest first — the cluster reads as a heap
-    /// with the heavy pebbles leading.
-    private var pebbleRows: [[(bucket: ShelfBucket, items: [ShelfItem])]] {
-        let sorted = buckets.sorted { $0.items.count > $1.items.count }
-        return stride(from: 0, to: sorted.count, by: 3).map {
-            Array(sorted[$0..<min($0 + 3, sorted.count)])
-        }
-    }
-
-    private static let morph = Animation.spring(response: 0.44, dampingFraction: 0.8)
-
-    private func open(_ bucket: ShelfBucket) {
-        withAnimation(Self.morph) { openBucket = bucket }
-    }
-
-    private func close() {
-        guard openBucket != nil else { return }
-        withAnimation(Self.morph) { openBucket = nil }
     }
 
     // MARK: - Chrome
@@ -198,176 +151,6 @@ struct ProfileView: View {
         if let memberSince { parts.append("since \(memberSince)") }
         if unfinishedCount > 0 { parts.append("\(unfinishedCount) working") }
         return parts.joined(separator: " · ")
-    }
-
-    // MARK: - Pebble cluster
-
-    /// One container for the whole cluster, so pebbles that crowd each other
-    /// fuse at the edges instead of overlapping as separate panes — and so an
-    /// opening pebble morphs out of the group rather than appearing over it.
-    private var cluster: some View {
-        GlassEffectContainer(spacing: 20) {
-            if let openBucket, let group = buckets.first(where: { $0.bucket == openBucket }) {
-                bucketPanel(bucket: group.bucket, count: group.items.count)
-                    // Shares an ID with the pebble it came from, so the glass
-                    // itself travels and re-shapes from that circle rather
-                    // than a new panel appearing over the cluster.
-                    .glassEffectID(group.bucket.rawValue, in: glass)
-                    .transition(.opacity)
-            } else if buckets.isEmpty {
-                emptyPebble
-            } else {
-                VStack(spacing: 16) {
-                    ForEach(Array(pebbleRows.enumerated()), id: \.offset) { _, row in
-                        HStack(alignment: .center, spacing: 16) {
-                            ForEach(row, id: \.bucket.id) { group in
-                                pebble(bucket: group.bucket, count: group.items.count)
-                                    .glassEffectID(group.bucket.rawValue, in: glass)
-                                    // The others shrink away rather than
-                                    // blinking out, so the eye can follow the
-                                    // one that is expanding.
-                                    .transition(.scale(scale: 0.4).combined(with: .opacity))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .animation(Self.morph, value: openBucket)
-        // Categorising runs after launch, so the set of buckets can change
-        // under an open panel. Without this the panel's bucket could vanish
-        // from the list and the page would sit on a branch that renders
-        // nothing — reading as a pebble that refused to open.
-        .onChange(of: buckets.map(\.bucket)) { _, current in
-            if let openBucket, !current.contains(openBucket) {
-                self.openBucket = nil
-            }
-        }
-    }
-
-    /// Diameter carries the count, so the cluster is a chart as well as a menu
-    /// — the shape of your shelf is visible before you read a single label.
-    private func diameter(for count: Int) -> CGFloat {
-        let share = Double(count) / Double(largestBucket)
-        return 62 + 46 * share
-    }
-
-    private func pebble(bucket: ShelfBucket, count: Int) -> some View {
-        let size = diameter(for: count)
-
-        return Button {
-            open(bucket)
-        } label: {
-            VStack(spacing: size * 0.015) {
-                Image(systemName: bucket.systemImage)
-                    .font(.system(size: size * 0.21, weight: .medium))
-                    .foregroundStyle(bucket.tint)
-                    .frame(height: size * 0.26)
-
-                Text("\(count)")
-                    .font(.system(size: size * 0.27, weight: .semibold, design: .serif).monospacedDigit())
-                    .foregroundStyle(CoveTheme.ink)
-                    .frame(height: size * 0.30)
-            }
-            .frame(width: size, height: size)
-            .glassEffect(.regular.interactive(), in: Circle())
-            // Without this the button only hit-tests the icon and number, so
-            // taps anywhere on the surrounding ring — most of the pebble —
-            // silently did nothing. That was the "sometimes won't open".
-            .contentShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(bucket.label), \(count) items")
-        .accessibilityHint("Opens details")
-    }
-
-    /// The cluster's resting state when there is nothing to show yet.
-    private var emptyPebble: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "tray")
-                .font(.title2.weight(.medium))
-                .foregroundStyle(CoveTheme.ink.opacity(0.5))
-            Text("Nothing saved yet")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(CoveTheme.ink.opacity(0.55))
-        }
-        .frame(width: 150, height: 150)
-        .glassEffect(.regular, in: Circle())
-    }
-
-    /// What the pebble becomes. Same glass, re-shaped — the morph is the whole
-    /// point of routing both through one `glassEffectID`.
-    private func bucketPanel(bucket: ShelfBucket, count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: bucket.systemImage)
-                    .font(.title3.weight(.medium))
-                    .foregroundStyle(bucket.tint)
-                    .frame(width: 44, height: 44)
-                    .background(bucket.tint.opacity(0.14), in: Circle())
-
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(bucket.label)
-                        .font(.system(.title3, design: .serif, weight: .semibold))
-                        .foregroundStyle(CoveTheme.ink)
-                    Text("\(count) of \(items.count) items")
-                        .font(.caption)
-                        .foregroundStyle(CoveTheme.ink.opacity(0.55))
-                }
-
-                Spacer(minLength: 0)
-
-                Button(action: close) {
-                    Image(systemName: "xmark")
-                        .font(.footnote.weight(.bold))
-                        .foregroundStyle(CoveTheme.ink.opacity(0.6))
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Close")
-            }
-
-            // Share of the shelf, as a glass-lensed bar.
-            ProgressView(value: Double(count), total: Double(max(items.count, 1)))
-                .tint(bucket.tint)
-
-            HStack(spacing: 10) {
-                Button {
-                    close()
-                    switch bucket {
-                    case .receipts:
-                        onOpenWallet()
-                    case .events:
-                        onOpenUpcoming()
-                    default:
-                        onOpenShelf()
-                    }
-                } label: {
-                    Label(
-                        destinationTitle(for: bucket),
-                        systemImage: "arrow.up.right"
-                    )
-                    .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.glass)
-                .tint(CoveTheme.ink)
-
-                Spacer(minLength: 0)
-            }
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 28))
-    }
-
-    private func destinationTitle(for bucket: ShelfBucket) -> String {
-        switch bucket {
-        case .receipts: "Open wallet"
-        case .events: "Open upcoming"
-        default: "Open home"
-        }
     }
 
     // MARK: - Footer
@@ -475,10 +258,11 @@ struct ProfileView: View {
         ) {
             Button("Delete everything", role: .destructive) {
                 modelContext.deleteShelfItems(items)
+                modelContext.deleteChatThreads(threads)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Every screenshot, note and pass Cove has saved is removed from this device. Your photo library itself is untouched. This can't be undone.")
+            Text("Every screenshot, note, pass and conversation Cove has saved is removed from this device. Your photo library itself is untouched. This can't be undone.")
         }
     }
 
@@ -550,6 +334,6 @@ struct ProfileView: View {
 
 #Preview("Profile") {
     ProfileView()
-        .modelContainer(for: ShelfItem.self, inMemory: true)
+        .modelContainer(for: [ShelfItem.self, ChatThread.self], inMemory: true)
         .environment(\.aiServices, .mock)
 }

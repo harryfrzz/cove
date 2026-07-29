@@ -523,6 +523,11 @@ private struct CoverFlowCarousel: View {
                 .frame(width: cardWidth)
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                CoveHaptics.impact(.soft)
+            }
+        )
         .rotation3DEffect(
             .degrees(angle),
             axis: (x: 0, y: 1, z: 0),
@@ -777,6 +782,11 @@ private struct WalletDetailPanel: View {
             .background(CoveTheme.ink, in: Capsule())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                CoveHaptics.impact(.soft)
+            }
+        )
         .padding(.top, 2)
         .accessibilityLabel("More details about \(card.title)")
         .accessibilityHint("Opens the original screenshot and everything Cove read from it")
