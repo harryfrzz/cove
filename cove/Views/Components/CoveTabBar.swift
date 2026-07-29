@@ -277,14 +277,15 @@ struct CoveTabBar: View {
             }
 
             if isResponding {
-                HStack(spacing: 9) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Thinking…")
-                        .font(.subheadline)
-                        .foregroundStyle(CoveTheme.inkSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // The same band the Home title sweeps while the shelf
+                // reindexes, in place of a spinner: one "Cove is working"
+                // signal, wherever the work is.
+                Text("Thinking…")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(CoveTheme.ink.opacity(0.58))
+                    .coveShimmer(isActive: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .accessibilityLabel("Thinking")
             } else {
                 ScrollView {
                     Text(responseText ?? "")

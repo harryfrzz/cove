@@ -29,6 +29,12 @@ struct ContentView: View {
     @State private var importer = GalleryImporter.shared
     @State private var aiSession: LanguageModelSession?
 
+    /// Temporary stand-in while the dock's prompt card is being tuned: every
+    /// prompt takes three seconds and answers "meow", so the shimmer has
+    /// something predictable to play against. Set to `false` to go back to the
+    /// on-device model below, which is otherwise untouched.
+    private static let usesDummyAIReply = true
+
     var body: some View {
         ZStack {
             CoveInkBackground()
@@ -132,6 +138,13 @@ struct ContentView: View {
     /// outlives it — without this the model would keep context the user had no
     /// way to see again.
     private func submitAIPrompt(_ text: String) async -> String {
+        if Self.usesDummyAIReply {
+            try? await Task.sleep(for: .seconds(3))
+            let answer = "meow"
+            record(question: text, answer: answer)
+            return answer
+        }
+
         if let unavailable = FoundationModelsService.availabilityError() {
             return unavailable.errorDescription ?? "The on-device model is unavailable."
         }

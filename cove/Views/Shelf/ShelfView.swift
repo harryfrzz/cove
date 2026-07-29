@@ -412,8 +412,6 @@ private struct CoveRefreshingTitle: View {
     let pullDistance: CGFloat
     let isRefreshing: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     private var title: some View {
         Text("Cove")
             .font(.system(.title2, design: .serif, weight: .semibold))
@@ -422,39 +420,7 @@ private struct CoveRefreshingTitle: View {
     var body: some View {
         title
             .foregroundStyle(CoveTheme.ink.opacity(isRefreshing ? 0.58 : 1))
-            .overlay {
-                TimelineView(
-                    .animation(
-                        minimumInterval: 1.0 / 30.0,
-                        paused: !isRefreshing || reduceMotion
-                    )
-                ) { timeline in
-                    GeometryReader { proxy in
-                        let width = max(proxy.size.width, 1)
-                        let bandWidth = width * 0.62
-                        let elapsed = timeline.date.timeIntervalSinceReferenceDate
-                        let phase = elapsed.truncatingRemainder(dividingBy: 1.05) / 1.05
-
-                        LinearGradient(
-                            colors: [
-                                .clear,
-                                Color.white.opacity(0.96),
-                                Color.orange.opacity(0.78),
-                                .clear,
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: bandWidth)
-                        .rotationEffect(.degrees(-12))
-                        .offset(
-                            x: -bandWidth + (width + bandWidth) * phase
-                        )
-                    }
-                }
-                .mask(title)
-                .opacity(isRefreshing && !reduceMotion ? 1 : 0)
-            }
+            .coveShimmer(isActive: isRefreshing)
             .scaleEffect(
                 isRefreshing
                     ? 1.18
